@@ -285,3 +285,59 @@ test("a source that is neither git nor store refuses to place the counts rather 
   assert.doesNotMatch(r.surveyed_reading, /the town was quiet/,
     "and must not hand over the git reading by default");
 });
+
+test("`carried_absent` reaches the receipt with its slugs, and a NOT-CHECKED carry is legible as one", () => {
+  // THE READER CHECK, ON THE FIELD THE 2026-09-12 CARRY ADDED. The composer
+  // passes `selection` through whole, so this field arrives for free — and
+  // "arrives for free" is exactly the condition under which a rename upstream
+  // goes unnoticed for weeks. It is asserted here for the same reason
+  // `docket_claims` is: this receipt is the only durable surface on which anyone
+  // can see that a crossing swept up a window the sweep's timing had orphaned.
+  const carried = compose({
+    source: "store",
+    store: {
+      ...STORE_REPORT,
+      selection: {
+        by: "docket", window: 185, entry: "fold-delta.mjs § foldDelta", docket_claims: 7,
+        carried_absent: {
+          checked: true, count: 2, canon_sha: "b".repeat(40),
+          slugs: ["neth/warm-stone-for-whoever-waits", "sophia-familiaris/reachability-is-not-permission"],
+          skipped_no_household: ["nobody/no-household-at-all"],
+        },
+        note: null,
+      },
+    },
+  });
+  assert.equal(carried.store.selection.carried_absent.count, 2);
+  assert.deepEqual(carried.store.selection.carried_absent.slugs,
+    ["neth/warm-stone-for-whoever-waits", "sophia-familiaris/reachability-is-not-permission"],
+    "BY NAME, not counted: a keeper who cannot see which marks were carried cannot check the repair against the "
+    + "notary's own listing, which is the only other place those slugs appear");
+  assert.equal(carried.store.selection.carried_absent.canon_sha, "b".repeat(40),
+    "and the state the absence was judged at, so the claim is answerable months later");
+  assert.equal(carried.store.selection.docket_claims, 7,
+    "while the docket's own size is untouched — `marks: 9` over `docket_claims: 7` is only readable beside the carry");
+  assert.deepEqual(carried.store.selection.carried_absent.skipped_no_household, ["nobody/no-household-at-all"],
+    "and a canon-absent mark the crossing could NOT carry is named on the receipt too — it needs a person, and a "
+    + "silent skip is how a mark stays lost for another three weeks");
+
+  // THE CONTROL, AND IT IS THE HALF THAT MATTERS ON A HAND-CARRY. A crossing run
+  // without `--world-repo` carries nothing and a town whose canon is complete
+  // carries nothing, and only one of those is evidence. `checked: false` is what
+  // stops the notary's `canon_absent` climbing for weeks under a receipt reading
+  // zero on every crossing.
+  const unchecked = compose({
+    source: "store",
+    store: {
+      ...STORE_REPORT,
+      selection: {
+        by: "docket", window: 185, entry: "fold-delta.mjs § foldDelta", docket_claims: 7,
+        carried_absent: { checked: false, count: 0, slugs: [], canon_sha: null },
+        note: null,
+      },
+    },
+  });
+  assert.equal(unchecked.store.selection.carried_absent.checked, false);
+  assert.equal(unchecked.store.selection.carried_absent.canon_sha, null,
+    "a crossing that never read canon must not appear to have read it at some sha");
+});
