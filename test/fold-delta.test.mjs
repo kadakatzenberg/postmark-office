@@ -281,7 +281,11 @@ const standingRow = (slug, { window = 184, markStatus = "standing" } = {}) => ({
 
 const WORLD_SHA = "c".repeat(40);
 
-/** What `canonRegisterAt` returns, hand-built — no clone, no git, no store. */
+/**
+ * What `canonRegisterAtSha` returns, hand-built — no clone, no git, no store.
+ * The sibling, not `canonRegisterAt`: that one is the notary's and stamps HEAD,
+ * and this shape is the one the crossing's caller actually produces.
+ */
 const registerOf = (...slugs) => ({
   slugs: new Set(slugs), sha: WORLD_SHA, count: slugs.length, source: "test", unreadable: [],
 });
