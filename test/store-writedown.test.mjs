@@ -962,3 +962,140 @@ test("F5 · planStoreWriteDown buckets by household and sorts, with no git and n
   assert.equal(plan.counts.written, 3, "with no canon to compare against, every mark is a change");
   assert.equal(plan.counts.unchanged, 0);
 });
+
+// ── F8q–F8v · THE CARRIED ROWS ARE A NAMED TERM, NOT A WIDER DOCKET ──────────
+//
+// From 2026-09-12: the fold now offers the window's docket UNION every standing
+// mark canon does not carry (`fold-delta.mjs § foldDelta`, the second term). So
+// `offered` can lawfully exceed `docket_claims`, and the guard has to be told
+// which part of the offered set is the docket's.
+//
+// THE DANGER IS THE OPPOSITE OF THE OBVIOUS ONE. Widening `docket_claims` to
+// include the carry would have kept the arithmetic tidy and SPENT THE GUARD: a
+// materialization that wrote nothing (docket 7, docket marks 0) alongside two
+// carried rows would arrive as `offered 2 > 0` and pass, and the disagreement
+// the guard exists to catch would be masked by the repair. F8s is that case.
+
+test("F8q · offered 9 reads as docket 7 plus carried 2, and is not starving", () => {
+  const r = starvingCheck({
+    marks: Array.from({ length: 9 }, (_, i) => ({ slug: `alpha/m${i}` })),
+    stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+    docketClaims: 7,
+    carriedAbsent: 2,
+    window: 185,
+  });
+  assert.equal(r.starving, false);
+  assert.equal(r.offered, 9);
+  assert.equal(r.docket_claims, 7, "the docket's size is still the docket's");
+  assert.equal(r.carried_absent, 2);
+  assert.equal(r.docket_offered, 7,
+    "and the term the guard actually tests is the docket's own, stated on the receipt rather than inferred");
+});
+
+test("F8r · a crossing whose docket is empty and whose carry is not is NOT called quiet", () => {
+  // The 09-12 repair crossing itself: nobody claimed at this window, and two
+  // marks are being swept up from an earlier one. Two files are published. A
+  // receipt calling that "quiet" would be a true guard telling a false story.
+  const r = starvingCheck({
+    marks: [{ slug: "neth/warm-stone-for-whoever-waits" }, { slug: "sophia-familiaris/reachability-is-not-permission" }],
+    stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+    docketClaims: 0,
+    carriedAbsent: 2,
+    window: 186,
+  });
+  assert.equal(r.starving, false);
+  assert.equal(r.quiet, false, "two marks are being written; that is not a quiet crossing");
+  assert.equal(r.docket_offered, 0);
+  assert.equal(r.carried_absent, 2);
+  assert.match(r.why, /carried/, "and the sentence says which of the two terms filled the fold");
+});
+
+test("F8s · THE TEETH · a carried row must not mask a docket that was never materialized", () => {
+  // The regression the named term exists to prevent. The candle locked 7 claims,
+  // the mark read for this window returned NONE, escrow stands — `store-starving`,
+  // exactly as before — and the two carried rows must not buy a pass by making
+  // `offered` positive.
+  const e = caught(() => starvingCheck({
+    marks: [{ slug: "neth/warm-stone-for-whoever-waits" }, { slug: "sophia-familiaris/reachability-is-not-permission" }],
+    stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+    docketClaims: 7,
+    carriedAbsent: 2,
+    window: 185,
+  }));
+  assert.ok(e instanceof FoldInputRefusal, "a docket with rows and no marks of its own must still refuse");
+  assert.equal(e.reason, "store-starving");
+  assert.match(e.detail, /canon-absent mark\(s\) this crossing is carrying .* are NOT an answer to this one/,
+    "and the refusal says the carried rows were not counted as an answer, or the operator argues with the arithmetic");
+  assert.match(e.detail, /no marks of this window's own docket/,
+    "and it names the subject as the DOCKET, not as the fold, now that the fold can lawfully hold rows from elsewhere");
+});
+
+test("F8t · a carry larger than the offered set is incoherent and refuses rather than going negative", () => {
+  // `docket_offered` is a subtraction, and a subtraction is a place a wrong
+  // supplier turns into a negative number that reads as "no docket rows" and
+  // passes. A subset cannot be larger than its set.
+  const e = caught(() => starvingCheck({
+    marks: [{ slug: "alpha/one" }],
+    stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+    docketClaims: 1,
+    carriedAbsent: 4,
+    window: 185,
+  }));
+  assert.ok(e instanceof FoldInputRefusal);
+  assert.equal(e.reason, "fold-input-shape");
+  assert.match(e.detail, /carried/);
+});
+
+test("F8u · a supplier that says nothing about carrying is read as zero, exactly as before the field", () => {
+  // Back-compatibility as a claim. Every fold input written before 2026-09-12
+  // reaches this guard with no `carried_absent`, and must be judged by the
+  // arithmetic it was written under.
+  const r = starvingCheck({
+    marks: [{ slug: "alpha/one" }],
+    stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+    docketClaims: 1,
+    window: 185,
+  });
+  assert.equal(r.starving, false);
+  assert.equal(r.carried_absent, 0);
+  assert.equal(r.docket_offered, 1);
+});
+
+test("F8v · storeWriteDown reads the carry off the selection and histograms both windows", () => {
+  // The whole path. A fold input carrying window 185's docket and two marks
+  // locked at 184 must publish all three, count the carry as its own term on the
+  // receipt, and report `written_by_locked_window` keyed by window — which is the
+  // measurement that says a crossing folded a delta and a repair rather than the
+  // standing set.
+  const w = makeWorld("carried-absent", { gitEraSketchbooks: [] });
+  const out = storeWriteDown({
+    repo: w.repo,
+    at: Date.parse(AT_ISO),
+    input: foldInput(
+      [
+        storeMark({ slug: "alpha/own-window", locked_window: 185 }),
+        storeMark({ slug: "alpha/warm-stone", locked_window: 184 }),
+        storeMark({ slug: "alpha/reachability", locked_window: 184 }),
+      ],
+      {
+        as_of: { window: 185, world_sha: "0".repeat(40), town_sha: "1".repeat(40) },
+        stakes: [{ mark: "alpha/staked", holder: "beta", n: 2, weight: 2, tick: 0 }],
+        selection: {
+          by: "docket", window: 185, entry: "fold-delta.mjs § foldDelta", docket_claims: 1,
+          carried_absent: {
+            checked: true, count: 2, canon_sha: "2".repeat(40),
+            slugs: ["alpha/reachability", "alpha/warm-stone"],
+          },
+          note: null,
+        },
+      },
+    ),
+  });
+  assert.equal(out.starving_check.starving, false);
+  assert.equal(out.starving_check.carried_absent, 2, "the guard was told, not left to infer");
+  assert.equal(out.starving_check.docket_offered, 1);
+  assert.deepEqual(out.written_by_locked_window, { 184: 2, 185: 1 },
+    "the histogram names both windows: this crossing's own, and the one it swept up behind it");
+  assert.equal(out.selection.carried_absent.count, 2, "and the slugs reach the receipt by name");
+  assert.deepEqual(out.selection.carried_absent.slugs, ["alpha/reachability", "alpha/warm-stone"]);
+});

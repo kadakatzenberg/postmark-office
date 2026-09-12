@@ -40,12 +40,34 @@ import { foldDelta } from "../world2/tools/fold-delta.mjs";
  * test did not anticipate, so a refusal that fires later than expected shows up
  * as an unanticipated read rather than as a silent pass.
  */
-function stubClient(windows, { marks = [], docketClaims = null, onUnexpected = null } = {}) {
+function stubClient(windows, {
+  marks = [], docketClaims = null, standing = null, absentRows = [], onUnexpected = null,
+} = {}) {
   const seen = [];
   return {
     seen,
     async query(text, params) {
       seen.push(text.trim().split("\n")[0].trim());
+      // ── THE CARRY'S TWO READS ────────────────────────────────────────────
+      //
+      // `standing` is the notary's own `STANDING_SELECT` answer, and it is NULL
+      // by default so every test written before the carry existed still proves
+      // what it proved: a fold handed no register must not ask for the standing
+      // set at all, and here that shows as a throw rather than as an empty read
+      // silently passing for one.
+      if (/FROM marks m/.test(text) && /m\.status = 'standing'/.test(text)) {
+        if (standing === null) {
+          throw new Error("the fold asked for the standing set, and this test supplied none — it should not have asked");
+        }
+        return { rows: standing };
+      }
+      // The full-column re-read of the slugs the fold decided to carry, FILTERED
+      // BY THE PARAMETER rather than returned wholesale, so a test can prove the
+      // fold asked for the slugs it named and not for a wider set.
+      if (/FROM marks WHERE slug = ANY/.test(text)) {
+        const want = new Set(params[0]);
+        return { rows: absentRows.filter((r) => want.has(r.slug)) };
+      }
       if (/FROM windows WHERE id = \$1/.test(text)) {
         const w = windows.find((x) => Number(x.id) === Number(params[0]));
         return { rows: w ? [w] : [] };
@@ -202,4 +224,223 @@ test("the newest-closed check happens BEFORE the marks are read", async () => {
     !c.seen.some((q) => /FROM marks/.test(q)),
     `it must refuse before reading any mark; it asked: ${JSON.stringify(c.seen)}`,
   );
+});
+
+// ── THE WINDOW CLEARED OUTSIDE THE SWEEP'S TIMING (2026-09-12) ───────────────
+//
+// THE DEFECT THESE ARE THE FALSIFIERS FOR. On 2026-09-12 the 05:45Z candle could
+// not log in; window 184 was cleared BY HAND at 05:52Z, locking two marks, and
+// the sweep's re-run refused on timing. The 17:45Z crossing folded window 185,
+// published its seven, and never wrote the two — which stand in the store with
+// no file in canon, and which the notary has listed as `canon_absent` every
+// 03:20 since. Nothing revisited window 184, because the docket selector asks
+// for ONE window by design.
+//
+// So the selection becomes the docket UNION every standing mark canon does not
+// carry. The docket query is untouched — it is still the selector, and its
+// refusals still fire first. The union is a SECOND, NAMED term, computed by the
+// notary's own reader (`canon-locks.mjs § STANDING_SELECT` and
+// `§ canonLockFindings`, against a register from `canon-register.mjs §
+// canonRegisterAt`), so a listing at 03:20 and a carry at 17:45 cannot come to
+// disagree about what "canon does not carry it" means.
+//
+// The two fixture slugs are the two real marks, because a falsifier named for
+// the instance it was written from is one a keeper can trace back.
+
+const WARM_STONE = "neth/warm-stone-for-whoever-waits";
+const REACHABILITY = "sophia-familiaris/reachability-is-not-permission";
+
+const CARRY_WINDOWS = [
+  { id: 186, status: "open", cleared_at: null, town_sha: null },
+  { id: 185, status: "closed", cleared_at: "2026-09-12 17:45:44.000000+00", town_sha: "723005e5" },
+  { id: 184, status: "closed", cleared_at: "2026-09-12 05:52:00.000000+00", town_sha: "2a681e6c" },
+];
+
+/** A full-column `marks` row, the shape `MARK_COLUMNS` returns. */
+const markRow = (slug, { window = 185, status = "standing" } = {}) => ({
+  id: `id:${slug}`, slug, kind: "sited", owner: slug.split("/")[0],
+  household: `solo:${slug.split("/")[0]}`, body: "b",
+  geometry: { at: { x: 1, y: 2 } }, status, locked_window: window, data: {},
+});
+
+/** A `STANDING_SELECT` row — the notary's shape, not the fold's. */
+const standingRow = (slug, { window = 184, markStatus = "standing" } = {}) => ({
+  slug, locked_window: window, mark_status: markStatus, tier: null,
+  locking_town_sha: "2a681e6c", claim_id: null, claim_status: "locked",
+  window_id: window, claimant: slug.split("/")[0], decided_at: "2026-09-12T05:52:00Z",
+});
+
+const WORLD_SHA = "c".repeat(40);
+
+/** What `canonRegisterAt` returns, hand-built — no clone, no git, no store. */
+const registerOf = (...slugs) => ({
+  slugs: new Set(slugs), sha: WORLD_SHA, count: slugs.length, source: "test", unreadable: [],
+});
+
+const carryClient = (opts = {}) => stubClient(CARRY_WINDOWS, { onUnexpected: escrowStub, ...opts });
+
+test("CARRIED · a mark locked at an earlier window and absent from canon is in this window's fold", async () => {
+  // The 09-12 defect exactly: window 185's docket is one mark, and two marks
+  // locked at 184 stand in the store with no file in canon. Before the union the
+  // fold returned one mark and the two were orphaned for good.
+  const client = carryClient({
+    marks: [markRow("alpha/one", { window: 185 })],
+    docketClaims: 1,
+    standing: [
+      standingRow("alpha/one", { window: 185 }),
+      standingRow(WARM_STONE), standingRow(REACHABILITY),
+    ],
+    absentRows: [markRow(WARM_STONE, { window: 184 }), markRow(REACHABILITY, { window: 184 })],
+  });
+  const out = await foldDelta(client, {
+    window: 185, worldSha: WORLD_SHA, canonRegister: registerOf("someone/else-entirely"),
+  });
+
+  assert.deepEqual(out.marks.map((m) => m.slug).sort(),
+    [WARM_STONE, "alpha/one", REACHABILITY].sort(),
+    "the fold carries the docket AND the two the 17:45Z crossing left behind");
+  assert.equal(out.selection.carried_absent.count, 2);
+  assert.deepEqual(out.selection.carried_absent.slugs, [WARM_STONE, REACHABILITY].sort());
+  assert.equal(out.selection.carried_absent.checked, true);
+  assert.equal(out.selection.carried_absent.canon_sha, WORLD_SHA,
+    "and the receipt names the state the absence was judged at — one stamp, one source");
+
+  const carried = out.marks.filter((m) => m.slug !== "alpha/one");
+  assert.deepEqual(carried.map((m) => m.locked_window), [184, 184],
+    "a carried mark keeps ITS OWN locking window, so `written_by_locked_window` reads {185:1, 184:2}");
+  assert.ok(carried.every((m) => m.bytes), "and it is rendered, not a slug in a list");
+});
+
+test("CARRIED · the docket's own rows are untouched — same count, same slugs, same bytes", async () => {
+  // The union must not become a second selector. The docket query is unchanged
+  // and its answer must survive the widening byte for byte.
+  const docket = [markRow("alpha/one", { window: 185 }), markRow("beta/two", { window: 185 })];
+  const plain = stubClient(CARRY_WINDOWS, { marks: docket, docketClaims: 2, onUnexpected: escrowStub });
+  const before = await foldDelta(plain, { window: 185, worldSha: WORLD_SHA });
+
+  const client = carryClient({
+    marks: docket,
+    docketClaims: 2,
+    standing: [standingRow("alpha/one", { window: 185 }), standingRow("beta/two", { window: 185 }),
+      standingRow(WARM_STONE)],
+    absentRows: [markRow(WARM_STONE, { window: 184 })],
+  });
+  const after = await foldDelta(client, {
+    window: 185, worldSha: WORLD_SHA, canonRegister: registerOf("someone/else-entirely"),
+  });
+
+  const own = after.marks.filter((m) => m.locked_window === 185);
+  assert.deepEqual(own.map((m) => m.slug), before.marks.map((m) => m.slug));
+  assert.deepEqual(own.map((m) => m.bytes), before.marks.map((m) => m.bytes));
+  assert.equal(after.selection.docket_claims, 2,
+    "and the docket's SIZE is still the docket's, not the union's");
+});
+
+test("NOT CARRIED · a mark the docket already holds is never also `carried_absent`", async () => {
+  // EVERY mark this crossing just locked is absent from canon at `world_from` —
+  // the push lands minutes AFTER the clear, which is why the lock-time refusal
+  // was withdrawn. So the docket's own rows arrive in the absent set on every
+  // ordinary crossing, and the dedup is what keeps this a union and not a
+  // double-write.
+  const client = carryClient({
+    marks: [markRow("alpha/one", { window: 185 })],
+    docketClaims: 1,
+    standing: [standingRow("alpha/one", { window: 185 })],
+    absentRows: [markRow("alpha/one", { window: 185 })],
+  });
+  const out = await foldDelta(client, {
+    window: 185, worldSha: WORLD_SHA, canonRegister: registerOf("someone/else-entirely"),
+  });
+  assert.equal(out.marks.length, 1, "one mark, once");
+  assert.equal(out.selection.carried_absent.count, 0);
+  assert.deepEqual(out.selection.carried_absent.slugs, []);
+});
+
+test("NOT CARRIED · a RETIRED mark absent from canon stays absent — the retire path's own meaning", async () => {
+  // A mark the world published and later UNPUBLISHED also has no file in canon.
+  // Carrying it would re-publish what the town has already recorded as gone.
+  // `STANDING_SELECT` filters this out and `canonLockFindings` filters it again;
+  // this asserts the SECOND lock, by handing the fold a row the first would have
+  // dropped.
+  const client = carryClient({
+    marks: [markRow("alpha/one", { window: 185 })],
+    docketClaims: 1,
+    standing: [standingRow("alpha/one", { window: 185 }),
+      standingRow(WARM_STONE, { markStatus: "retired" })],
+    absentRows: [markRow(WARM_STONE, { window: 184, status: "retired" })],
+  });
+  const out = await foldDelta(client, {
+    window: 185, worldSha: WORLD_SHA, canonRegister: registerOf("someone/else-entirely"),
+  });
+  assert.equal(out.selection.carried_absent.count, 0, "a retirement is not a shortfall");
+  assert.deepEqual(out.marks.map((m) => m.slug), ["alpha/one"]);
+});
+
+test("NOT CARRIED · a mark locked earlier whose file IS in canon is left alone", async () => {
+  // There is nothing to write. Carrying it would make every crossing re-offer
+  // the standing corpus — the 956-write configuration wearing a delta's name.
+  const client = carryClient({
+    marks: [markRow("alpha/one", { window: 185 })],
+    docketClaims: 1,
+    standing: [standingRow("alpha/one", { window: 185 }), standingRow(WARM_STONE)],
+    absentRows: [markRow(WARM_STONE, { window: 184 })],
+  });
+  const out = await foldDelta(client, {
+    window: 185, worldSha: WORLD_SHA, canonRegister: registerOf(WARM_STONE),
+  });
+  assert.equal(out.selection.carried_absent.count, 0);
+  assert.deepEqual(out.marks.map((m) => m.slug), ["alpha/one"]);
+});
+
+test("NO REGISTER · the fold does not carry, SAYS it did not check, and asks the store nothing extra", async () => {
+  // The hand-carry's safety property. A caller with no world checkout folds
+  // exactly the docket, as it did before this field existed — and the receipt
+  // says `checked: false` rather than an unqualified zero, because "carried
+  // nothing" and "never looked" are different states and only one is evidence.
+  const client = stubClient(CARRY_WINDOWS, {
+    marks: [markRow("alpha/one", { window: 185 })], docketClaims: 1, onUnexpected: escrowStub,
+  });
+  const out = await foldDelta(client, { window: 185, worldSha: WORLD_SHA });
+  assert.deepEqual(out.marks.map((m) => m.slug), ["alpha/one"]);
+  assert.equal(out.selection.carried_absent.checked, false);
+  assert.equal(out.selection.carried_absent.count, 0);
+  assert.equal(out.selection.carried_absent.canon_sha, null);
+  assert.ok(!client.seen.some((q) => /standing/.test(q)),
+    `it must not read the standing set with no register; it asked: ${JSON.stringify(client.seen)}`);
+});
+
+test("THE REGISTER MUST BE THE FOLD'S OWN WORLD SHA, or the absence was judged against another world", async () => {
+  // `as_of.world_sha` is what the receipt says the crossing folded from. A
+  // register built at a DIFFERENT checkout would answer "canon does not carry
+  // this" about a world this crossing is not publishing into — a carry that is
+  // correct, precise, and about the wrong subject. In the sweep the two are the
+  // same by construction (`$SWEEP` is checked out at `$WORLD_FROM`), so this can
+  // only fire on a hand-run pointed at the wrong clone, which is exactly when it
+  // should.
+  const client = carryClient({
+    marks: [markRow("alpha/one", { window: 185 })], docketClaims: 1,
+    standing: [standingRow("alpha/one", { window: 185 })], absentRows: [],
+  });
+  const e = await caught(() => foldDelta(client, {
+    window: 185, worldSha: "d".repeat(40), canonRegister: registerOf("someone/else-entirely"),
+  }));
+  assert.ok(e, "it must refuse");
+  assert.match(e.message, /^canon-register-sha-mismatch/);
+  assert.match(e.message, /dddddddd/,
+    "and it must name both shas, or the operator cannot tell which clone was wrong");
+  assert.match(e.message, /cccccccc/);
+});
+
+test("REFUSALS STAY · an older window still refuses before any canon read", async () => {
+  // The widening must not become a way to fold an old window "because the marks
+  // are absent anyway". The docket refusals are first, and they are unchanged.
+  const client = carryClient({
+    standing: [standingRow(WARM_STONE)], absentRows: [markRow(WARM_STONE, { window: 184 })],
+  });
+  const e = await caught(() => foldDelta(client, {
+    window: 184, worldSha: WORLD_SHA, canonRegister: registerOf("someone/else-entirely"),
+  }));
+  assert.match(e.message, /^not-newest-closed-window/);
+  assert.ok(!client.seen.some((q) => /standing/.test(q)),
+    `a refused window is never carried for; it asked: ${JSON.stringify(client.seen)}`);
 });
