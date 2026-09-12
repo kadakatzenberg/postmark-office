@@ -195,15 +195,34 @@ export async function foldDelta(
   // says this crossing folded from. A register built at a DIFFERENT checkout
   // answers "canon does not carry this" about a world this crossing is not
   // publishing into — a carry that is correct, precise, and about the wrong
-  // subject, which is the worst shape an instrument has. In the sweep the two are
-  // the same by construction (`deploy/settlement-auto.sh` checks `$SWEEP` out at
-  // `$WORLD_FROM` and passes both), so this cannot fire on the rail; it fires on
-  // a hand-run pointed at the wrong clone, which is exactly when it should.
+  // subject, which is the worst shape an instrument has.
+  //
+  // WHY IT CANNOT FIRE ON THE RAIL, AND THE REASON THIS COMMENT FIRST GAVE WAS
+  // FALSE. It said the two were "the same by construction (`settlement-auto.sh`
+  // checks `$SWEEP` out at `$WORLD_FROM` and passes both)". THAT WAS WRONG, and
+  // the sentence is corrected rather than removed because it is the tempting one:
+  // the sweep checks the clone out at `$WORLD_FROM` and then COMMITS
+  // `WORLD/households.json` onto it whenever the household registry moved
+  // (`deploy/settlement-auto.sh:386-395`, which that script's own :418-425 spells
+  // out), so the clone's HEAD is one commit past `$WORLD_FROM` on every crossing
+  // that follows a household declaration. A register stamped HEAD would have made
+  // this check refuse a crossing that was fine.
+  //
+  // The identity holds by construction OF THE READER, not of the checkout:
+  // `fold-input-cli.mjs` builds the register with `canon-register.mjs §
+  // canonRegisterAtSha`, which is handed `--world-sha` and reads the tree at THAT
+  // COMMIT — never the working tree and never HEAD. So `register.sha` is the sha
+  // the crossing named, and what remains for this check to catch is a caller that
+  // built its register somewhere else: a hand-run pointed at the wrong clone, or
+  // a future path that goes back to reading a checkout. Which is exactly when it
+  // should fire.
   if (canonRegister !== null && canonRegister !== undefined) {
     if (!(canonRegister.slugs instanceof Set) || typeof canonRegister.sha !== "string") {
       throw new Error(
-        "canon-register-shape: `canonRegister` is not what `canon-register.mjs § canonRegisterAt` returns (a `slugs` "
-        + "Set and the `sha` that answer is true at). The carry is only as good as the register behind it, and a "
+        "canon-register-shape: `canonRegister` is not what `canon-register.mjs § canonRegisterAtSha` returns (a "
+        + "`slugs` Set and the `sha` that answer is true at). That is the sibling the crossing's caller builds its "
+        + "register with — the one that reads a NAMED commit rather than a checkout's HEAD — and naming it here is "
+        + "the whole repair a reader needs to make. The carry is only as good as the register behind it, and a "
         + "register this function had to interpret would be a second answer to what canon carries.");
     }
     if (canonRegister.sha !== worldSha) {
