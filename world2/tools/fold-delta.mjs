@@ -325,27 +325,52 @@ export async function foldDelta(
   // construction.
   let carriedSlugs = [];
   let carriedRows = [];
+  let skippedNoHousehold = [];
   if (canonRegister) {
     const standing = await client.query(STANDING_SELECT);
     const { absent } = canonLockFindings(standing.rows, canonRegister);
     const docketSlugs = new Set(rows.map((r) => r.slug));
-    carriedSlugs = absent.map((r) => r.slug).filter((s) => !docketSlugs.has(s)).sort();
-    if (carriedSlugs.length) {
+    const candidates = absent.map((r) => r.slug).filter((s) => !docketSlugs.has(s)).sort();
+    if (candidates.length) {
       const carried = await client.query(
-        `SELECT ${MARK_COLUMNS} FROM marks WHERE slug = ANY($1::text[]) ORDER BY slug`, [carriedSlugs]);
-      carriedRows = carried.rows;
+        `SELECT ${MARK_COLUMNS} FROM marks WHERE slug = ANY($1::text[]) ORDER BY slug`, [candidates]);
       // A slug the judgement named and the column read cannot produce is a store
-      // disagreeing with itself between two statements of one transaction. It is
-      // not a thing to carry quietly at a smaller count: the receipt would say
+      // disagreeing with itself between two statements of one crossing. It is not
+      // a thing to carry quietly at a smaller count: the receipt would say
       // `carried_absent 2` over one written mark and nothing downstream could
-      // attribute the gap.
-      if (carriedRows.length !== carriedSlugs.length) {
-        const got = new Set(carriedRows.map((r) => r.slug));
+      // attribute the gap. Checked BEFORE the household filter below, so a row
+      // that vanished and a row that was skipped stay two different findings.
+      if (carried.rows.length !== candidates.length) {
+        const got = new Set(carried.rows.map((r) => r.slug));
         throw new Error(
-          `carried-mark-vanished: the canon-absent read named ${carriedSlugs.length} slug(s) to carry and the mark `
-          + `read returned ${carriedRows.length} — missing ${carriedSlugs.filter((s) => !got.has(s)).join(", ")}. `
+          `carried-mark-vanished: the canon-absent read named ${candidates.length} slug(s) to carry and the mark `
+          + `read returned ${carried.rows.length} — missing ${candidates.filter((s) => !got.has(s)).join(", ")}. `
           + "Two reads of `marks` in one crossing disagreed about which rows exist.");
       }
+
+      // ── A CARRIED CANDIDATE WITH NO HOUSEHOLD IS NAMED AND SKIPPED ─────────
+      //                                            (reviewer, 2026-09-12)
+      //
+      // `marks.household` is NULLABLE (`world2/schema/001_tables.sql`), and
+      // `src/store-writedown.mjs § normalizeMark` refuses the WHOLE fold input
+      // with `mark-without-household` when it meets one. The docket never meets
+      // it — the door composes a household on every path that locks a claim — but
+      // THIS term draws from the whole standing corpus, so a single canon-absent
+      // standing row with a null household would have refused every crossing in
+      // the town until somebody edited the store by hand.
+      //
+      // Skipped, not carried, and NAMED: a silent skip is how a mark stays lost
+      // for another three weeks, which is the defect this whole term exists to
+      // end. The notary goes on listing it at 03:20, which is the right place for
+      // a row that needs a person.
+      //
+      // The test is FALSY, not null-only: an empty-string household resolves to a
+      // sketchbook name of nothing, and `?? null` would have let it through.
+      for (const r of carried.rows) {
+        if (!r.household) { skippedNoHousehold.push(r.slug); continue; }
+        carriedRows.push(r);
+      }
+      carriedSlugs = carriedRows.map((r) => r.slug);   // the query ordered by slug already
     }
   }
 
@@ -394,10 +419,17 @@ export async function foldDelta(
       // and never from `world_sha` beside it, even though the two are checked
       // equal above. One stamp, one source: a field copied from its neighbour
       // stops being evidence the moment the check between them is edited.
+      //
+      // `skipped_no_household` is the term beside it, present and EMPTY on an
+      // ordinary crossing. A field that appeared only on the bad crossings is a
+      // field whose absence starts meaning "fine" — the same rule `note: null`
+      // keeps. A row here needs a person: nothing downstream can invent a
+      // household, and the notary goes on listing it at 03:20 until one does.
       carried_absent: {
         checked: Boolean(canonRegister),
         count: carriedSlugs.length,
         slugs: carriedSlugs,
+        skipped_no_household: skippedNoHousehold,
         canon_sha: canonRegister ? canonRegister.sha : null,
       },
       // `note: null` is not decoration. There is one selector now and no

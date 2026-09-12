@@ -710,11 +710,26 @@ if [ "$SOURCE" = "store" ]; then
   #
   # ── AND `--world-repo` IS THE CARRY'S ONE ARGUMENT (2026-09-12) ─────────────
   #
-  # `$SWEEP` is the world clone and it is checked out at `$WORLD_FROM` two
-  # hundred lines above (`git -C "$SWEEP" checkout -qf -B main origin/main`, just
-  # after `WORLD_FROM` is read from the same ref), so the register built from it
-  # answers about exactly the commit `--world-sha` names. `foldDelta` refuses if
-  # the two ever part company rather than judging absence against another world.
+  # `$SWEEP` is the world clone. It is checked out at `$WORLD_FROM` two hundred
+  # lines above — AND ITS HEAD MAY ALREADY HAVE MOVED PAST IT BY THIS LINE.
+  #
+  # AN EARLIER VERSION OF THIS COMMENT SAID THE TWO WERE EQUAL BY CONSTRUCTION,
+  # AND THAT WAS WRONG, and the correction is left visible rather than swapped
+  # out because the wrong sentence is the more tempting one to write. The registry
+  # refresh at :386-395 COMMITS `WORLD/households.json` onto this clone whenever
+  # the household mapping moved, before the fold runs — which is exactly what
+  # :418-425 says two hundred lines below ("main may already be ahead of
+  # origin/main at this line"). A register stamped `git rev-parse HEAD` would then
+  # carry a sha one commit past `--world-sha`, the fold's equality check would
+  # throw, and THE CROSSING WOULD PUBLISH NOTHING — intermittently, only on the
+  # crossings that follow a household declaration.
+  #
+  # So the register is read AT `--world-sha` (`canon-register.mjs §
+  # canonRegisterAtSha` materializes that commit's `WORLD/marks` and runs the
+  # checkout's own loader over it). The equality is true by construction now, and
+  # `foldDelta` keeps the check as the falsifier for the day something other than
+  # the registry moves main before the fold. What is passed here is only the
+  # clone that HOLDS the object; the sha decides what is read.
   #
   # WITH IT the fold carries every standing mark canon does not hold, beside its
   # own docket — the repair for a window cleared outside this script's timing
@@ -742,7 +757,7 @@ if [ "$SOURCE" = "store" ]; then
     cat "$STORE_JSON" >&2 2>/dev/null || true; cat "$WORK/store.err" >&2
     exit 1
   fi
-  echo "[settlement-auto] store: $(node -e 'const r=require(process.argv[1]);const a=r.as_of||{};const g=r.ingest||{};process.stdout.write(String(r.written||0)+" of "+String(r.marks||0)+" mark(s) written into "+String((r.households||[]).length)+" sketchbook(s) at window "+String(a.window)+" ("+String(r.unchanged_skipped||0)+" unchanged, not re-materialized)"+(function(c){return c&&c.checked?(c.count?"; CARRIED "+c.count+" canon-absent mark(s) from earlier window(s): "+c.slugs.join(", "):"; carried 0, canon complete at "+String(c.canon_sha||"?").slice(0,9)):"; CARRY NOT CHECKED (no --world-repo)";})(((r.selection||{}).carried_absent)||null)+"; escrow ingested at town "+String(g.storeSha||"?").slice(0,9)+" ("+String(g.reason||"?")+(Number.isFinite(g.behind)?", behind "+g.behind:"")+"); cleared "+String((r.sketchbooks_cleared||{}).removed_remote||0)+" origin + "+String((r.sketchbooks_cleared||{}).removed_local||0)+" local git-era draft ref(s)")' "$STORE_JSON")" >&2
+  echo "[settlement-auto] store: $(node -e 'const r=require(process.argv[1]);const a=r.as_of||{};const g=r.ingest||{};process.stdout.write(String(r.written||0)+" of "+String(r.marks||0)+" mark(s) written into "+String((r.households||[]).length)+" sketchbook(s) at window "+String(a.window)+" ("+String(r.unchanged_skipped||0)+" unchanged, not re-materialized)"+(function(c){return c&&c.checked?(c.count?"; CARRIED "+c.count+" canon-absent mark(s) from earlier window(s): "+c.slugs.join(", "):"; carried 0, canon complete at "+String(c.canon_sha||"?").slice(0,9))+((c.skipped_no_household||[]).length?"; SKIPPED "+c.skipped_no_household.length+" canon-absent mark(s) with NO HOUSEHOLD (needs a person, not a crossing): "+c.skipped_no_household.join(", "):""):"; CARRY NOT CHECKED (no --world-repo)";})(((r.selection||{}).carried_absent)||null)+"; escrow ingested at town "+String(g.storeSha||"?").slice(0,9)+" ("+String(g.reason||"?")+(Number.isFinite(g.behind)?", behind "+g.behind:"")+"); cleared "+String((r.sketchbooks_cleared||{}).removed_remote||0)+" origin + "+String((r.sketchbooks_cleared||{}).removed_local||0)+" local git-era draft ref(s)")' "$STORE_JSON")" >&2
   # THE INGEST DISTANCE, SHOUTED WHEN IT IS NOT ZERO. The crossing is lawful and
   # publishes: its escrow is honestly as-of the ingested sha. But an ingest that
   # quietly stopped is the starving-crossing shape one layer up, and a receipt

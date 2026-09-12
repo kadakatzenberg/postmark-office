@@ -82,8 +82,16 @@ import { foldDelta, isDocketCount } from "./fold-delta.mjs";
 // The canon register, built HERE and not inside the fold, because it reads a git
 // checkout and `foldDelta` has never touched a filesystem — which is what keeps
 // the carry's rules provable on hand-built rows with no clone and no Postgres.
-// It is the same function the notary's 03:20 read builds its register with.
-import { canonRegisterAt } from "./canon-register.mjs";
+//
+// THE SHA-TAKING SIBLING, NOT THE NOTARY'S `canonRegisterAt` (reviewer,
+// 2026-09-12). That one stamps `git rev-parse HEAD`, and the sweep COMMITS
+// `WORLD/households.json` onto this very clone before the fold runs whenever
+// the household registry moved — so HEAD is one commit past `--world-sha` on
+// any crossing after a household is declared, and the fold's equality check
+// would have refused a crossing that was fine. Reading at the sha makes
+// `register.sha === worldSha` true BY CONSTRUCTION and leaves that check as the
+// falsifier for the day something other than the registry moves main first.
+import { canonRegisterAtSha } from "./canon-register.mjs";
 
 const argOf = (n, d = null) => { const i = process.argv.indexOf(n); return i !== -1 ? process.argv[i + 1] : d; };
 
@@ -199,7 +207,7 @@ if (isMain) {
   let canonRegister = null;
   if (worldRepo) {
     try {
-      canonRegister = await canonRegisterAt({ backend: "git", worldRepo });
+      canonRegister = await canonRegisterAtSha({ worldRepo, sha: worldSha });
     } catch (e) {
       refuse(
         "canon-register-unreadable",

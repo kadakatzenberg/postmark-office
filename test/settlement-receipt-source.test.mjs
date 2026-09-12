@@ -302,6 +302,7 @@ test("`carried_absent` reaches the receipt with its slugs, and a NOT-CHECKED car
         carried_absent: {
           checked: true, count: 2, canon_sha: "b".repeat(40),
           slugs: ["neth/warm-stone-for-whoever-waits", "sophia-familiaris/reachability-is-not-permission"],
+          skipped_no_household: ["nobody/no-household-at-all"],
         },
         note: null,
       },
@@ -316,6 +317,9 @@ test("`carried_absent` reaches the receipt with its slugs, and a NOT-CHECKED car
     "and the state the absence was judged at, so the claim is answerable months later");
   assert.equal(carried.store.selection.docket_claims, 7,
     "while the docket's own size is untouched — `marks: 9` over `docket_claims: 7` is only readable beside the carry");
+  assert.deepEqual(carried.store.selection.carried_absent.skipped_no_household, ["nobody/no-household-at-all"],
+    "and a canon-absent mark the crossing could NOT carry is named on the receipt too — it needs a person, and a "
+    + "silent skip is how a mark stays lost for another three weeks");
 
   // THE CONTROL, AND IT IS THE HALF THAT MATTERS ON A HAND-CARRY. A crossing run
   // without `--world-repo` carries nothing and a town whose canon is complete
