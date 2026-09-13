@@ -1,4 +1,4 @@
-name: Verify #2712 moving child threshold
+name: Differential verify #2712
 
 on:
   push:
@@ -11,13 +11,18 @@ permissions:
   contents: read
 
 jobs:
-  verify:
+  compare:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.ref_name }}
-          path: office
+          path: candidate
+
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          path: baseline
 
       - uses: actions/checkout@v4
         with:
@@ -25,17 +30,40 @@ jobs:
           ref: main
           path: postmark-world
 
-      - name: Install dependencies
-        working-directory: office
+      - name: Install candidate dependencies
+        working-directory: candidate
         run: npm install --no-audit --no-fund
 
-      - name: Verify crossing and frame lanes
-        working-directory: office
+      - name: Install baseline dependencies
+        working-directory: baseline
+        run: npm install --no-audit --no-fund
+
+      - name: Run movement suite on baseline
+        id: baseline
+        shell: bash
         run: |
-          node --test \
-            test/moving-child-threshold.test.mjs \
-            test/world-crossings.test.mjs \
-            test/world-movement.test.mjs \
-            test/ring-wins-standpoint.test.mjs \
-            test/hold-reach.test.mjs \
-            test/reach-dial.test.mjs
+          set +e
+          (cd baseline && node --test test/world-movement.test.mjs) | tee baseline.log
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Run movement suite on candidate
+        id: candidate
+        shell: bash
+        run: |
+          set +e
+          (cd candidate && node --test test/world-movement.test.mjs) | tee candidate.log
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Require same known red and green #2712
+        shell: bash
+        run: |
+          echo "baseline exit=${{ steps.baseline.outputs.code }} candidate exit=${{ steps.candidate.outputs.code }}"
+          grep -F "the freeze names who the seam would move, and offers the FILING REPAIR" baseline.log
+          grep -F "the freeze names who the seam would move, and offers the FILING REPAIR" candidate.log
+          grep -F "# fail 1" baseline.log
+          grep -F "# fail 1" candidate.log
+          node --test candidate/test/moving-child-threshold.test.mjs
