@@ -4,6 +4,9 @@ on:
   push:
     branches: ["fix/mcp-send-nonce-card"]
 
+permissions:
+  contents: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -13,4 +16,76 @@ jobs:
         with:
           node-version: 24
       - run: npm install --no-audit --no-fund
-      - run: node --test test/household-send-nonce-card.test.mjs
+      - name: Apply minimal MCP-only nonce card patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          p = Path("src/household-apex.mjs")
+          s = p.read_text()
+
+          old = '''function fieldsForAct(act, { schemas, schemaRequired } = {}) {
+            const spec = ACTS[act];
+            if (!spec) return {};
+            const strip = STANDPOINT_HANDLE_ACTS.has(act) ? new Set(["handle"]) : new Set();
+            if (act === "begin" || act === "declare") {
+              return actionFields(DECLARE_SCHEMA.properties, DECLARE_SCHEMA.required, { strip });
+            }
+            const own = APEX_ONLY_FIELDS[act];
+            if (own) return actionFields(own.properties, own.required, { strip });
+            return actionFields(schemas?.[spec.tool] ?? {}, schemaRequired?.[spec.tool] ?? [], { strip });
+          }
+          '''
+
+          new = '''function fieldsForAct(act, { schemas, schemaRequired, slim = false } = {}) {
+            const spec = ACTS[act];
+            if (!spec) return {};
+            const strip = STANDPOINT_HANDLE_ACTS.has(act) ? new Set(["handle"]) : new Set();
+            if (act === "begin" || act === "declare") {
+              return actionFields(DECLARE_SCHEMA.properties, DECLARE_SCHEMA.required, { strip });
+            }
+            const own = APEX_ONLY_FIELDS[act];
+            if (own) return actionFields(own.properties, own.required, { strip });
+            const fields = actionFields(schemas?.[spec.tool] ?? {}, schemaRequired?.[spec.tool] ?? [], { strip });
+            if (slim && act === "send") {
+              fields.nonce = {
+                type: "string",
+                description: "optional retry key for this send; the same nonce returns the first letter's receipt instead of writing a second letter",
+              };
+            }
+            return fields;
+          }
+          '''
+
+          if old in s:
+            s = s.replace(old, new, 1)
+            replacements = [
+              ('acts: capabilityIndex({ schemas, schemaRequired }),', 'acts: capabilityIndex({ schemas, schemaRequired, slim }),'),
+              ('return { read: what, card: actCard(what, store.db, { schemas, schemaRequired }), reading_law: READING_LAW };',
+               'return { read: what, card: actCard(what, store.db, { schemas, schemaRequired, slim }), reading_law: READING_LAW };'),
+              ('try { card = actCard(act, store.db, { schemas, schemaRequired }); } finally { store.db?.close(); }',
+               'try { card = actCard(act, store.db, { schemas, schemaRequired, slim }); } finally { store.db?.close(); }'),
+            ]
+            for before, after in replacements:
+              if before not in s:
+                raise SystemExit(f"expected source seam missing: {before}")
+              s = s.replace(before, after, 1)
+            p.write_text(s)
+          elif 'function fieldsForAct(act, { schemas, schemaRequired, slim = false } = {}) {' in s:
+            print("source patch already present")
+          else:
+            raise SystemExit("fieldsForAct source shape changed; refusing to guess")
+          PY
+      - run: node --test test/household-send-nonce-card.test.mjs test/foyer-shrink.test.mjs
+      - run: git diff --check
+      - name: Commit source patch when newly applied
+        run: |
+          if git diff --quiet -- src/household-apex.mjs; then
+            echo "source already committed"
+            exit 0
+          fi
+          git config user.name "Sophia Familiaris"
+          git config user.email "131329396+kadakatzenberg@users.noreply.github.com"
+          git add src/household-apex.mjs
+          git commit -m "fix(household): advertise send nonce on MCP"
+          git push origin HEAD:fix/mcp-send-nonce-card
