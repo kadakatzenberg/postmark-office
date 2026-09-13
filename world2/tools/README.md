@@ -2568,7 +2568,7 @@ x,y because that is the photograph the crossing log took, and the live one store
 an anchor and an offset because the witnessed-line ruling says a bare world x,y
 is *"a photograph of a moving thing"*. A live say whose anchor does not resolve
 is REFUSED, never placed at `{0,0}` — `composeAnchor`'s own refusal, carried up,
-and Ferry's crossing is a real place somebody could be standing.
+and the Origin is a real place somebody could be standing.
 
 An act no era explains refuses the whole read, by name. That is the live lane's
 rule and it earned itself twice there.
@@ -2715,7 +2715,7 @@ node world2/tools/falsifier-apex-equality.mjs --world-repo /srv/world2-lab/world
 ```
 
 Run 2026-09-03 against `world2_dev` + the frozen lab office, 14 standpoints
-derived from the store (a berth, the vessel, Ferry's crossing, the commons, a
+derived from the store (a berth, the vessel, the Origin, the commons, a
 minting ground, a mark inside a parcel, a parcel centre, open ground, six spread
 parcels):
 

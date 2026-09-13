@@ -289,7 +289,7 @@ export const TOOLS = [
       // frame, one wording. `on` is that door's `parent_id` under the word this
       // lane reads it back with (`standing_at`), because a poster naming where
       // an idea stands should not have to learn a second vocabulary to do it.
-      at: { type: "object", description: "optional — grid meters east/south of Ferry's crossing; stands the idea there instead of in the Tank (exclusive with on)", properties: { x: { type: "number" }, y: { type: "number" } } },
+      at: { type: "object", description: "optional — grid meters east/south of the Origin; stands the idea there instead of in the Tank (exclusive with on)", properties: { x: { type: "number" }, y: { type: "number" } } },
       on: { type: "string", description: "optional — the mark this idea is ABOUT, <by>/<slug>: the idea is planted as a predicated child of it rather than standing on ground (exclusive with at)" },
       stamps: { type: "integer", description: "escrow published with it (default 1; more is more weight; 0 bounces — private drafts live at the world door)" },
       by: { type: "string", description: "which of your handles posts it (omit if your key holds exactly one)" },

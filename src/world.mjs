@@ -148,15 +148,15 @@ async function world() {
   return assembled;
 }
 
-const QUAY = { x: 0, y: 0 }; // Ferry's crossing — the grid origin, the default standpoint
+const ORIGIN = { x: 0, y: 0 }; // the Origin — {0,0}, where the ferry lands; the grid origin and the default standpoint
 
 // The BERTH quay is mark-sourced (Keemin-ruled 2026-08-17, the relocation):
 // arrivals stand at the-town/the-quay on the Long Run Harbor's stone edge —
 // read from the world's own record at act time, the 008b pattern. The {0,0}
 // constant above stays as the pre-ruling fallback and as the default
 // standpoint for everyone else (unplaced residents, spectators): if the quay
-// mark ever leaves the record, a berth stands at Ferry's crossing again
-// rather than nowhere. Only berths relocate; the crossing keeps its name.
+// mark ever leaves the record, a berth stands at the Origin again
+// rather than nowhere. Only berths relocate; the Origin stays where it is.
 const QUAY_MARK_ID = "the-town/the-quay";
 async function berthQuay() {
   try {
@@ -165,7 +165,7 @@ async function berthQuay() {
       && Number.isFinite(m?.at?.x) && Number.isFinite(m?.at?.y));
     if (q) return { x: q.at.x, y: q.at.y };
   } catch { /* the fallback is the law, not an accident */ }
-  return QUAY;
+  return ORIGIN;
 }
 
 // The waitees ride ABOARD (Keemin-ruled 2026-08-17, Monday): a berth whose
@@ -239,7 +239,7 @@ export function chooseStandpoint(args, key) {
       hint: `this key stands as ${handles.length} residents — pass handle: one of ${handles.join(", ")} (or look as the spectator with x/y coords and no handle)`,
       choices: handles } };
   if (handles.length === 1) return { stance: "embodied", handle: handles[0] };
-  return { stance: "spectator", coords: { ...QUAY, from: "the quay (Ferry's crossing)" } };
+  return { stance: "spectator", coords: { ...ORIGIN, from: "the Origin" } };
 }
 
 // THE PARCEL IS THE HOME (ruling 7, 2026-07-27) — and the derivation is NOT
@@ -252,7 +252,7 @@ export function chooseStandpoint(args, key) {
 // changes in one file and every surface follows.
 //
 // Local shape only: the engine answers { x, y, placed, source, mark_id }; the
-// door's own vocabulary (`from`, and the quay default for the unplaced) is the
+// door's own vocabulary (`from`, and the Origin default for the unplaced) is the
 // office's to speak, so the mapping lives here and the reasoning does not.
 async function whereMod() {
   if (_where) return _where;
@@ -261,17 +261,17 @@ async function whereMod() {
 }
 
 // The door's phrasing over the engine's answer. Unplaced still stands at the
-// quay HERE — a standpoint must be a point — but that default is now this
+// Origin HERE — a standpoint must be a point — but that default is now this
 // function's choice, spoken in words that say so, not a null smuggled in as
 // coordinates (see NOWHERE in the engine: unplaced never reads as the origin).
-async function homeCoords(handle, w) {
+export async function homeCoords(handle, w) {
   const { homeOf } = await whereMod();
   const home = homeOf(handle, w);
   if (home.placed) {
     return { x: home.x, y: home.y, from: `your ground (${home.mark_id})`,
              parcel: { id: home.parcel.id, at: home.parcel.at, extent: home.parcel.extent } };
   }
-  return { ...QUAY, from: `${handle} has no ground on the map yet — the quay` };
+  return { ...ORIGIN, from: `${handle} has no ground on the map yet — the Origin` };
 }
 
 // The walk ledger is PUBLIC record on main, and the pens share this clone —
@@ -740,9 +740,9 @@ const voices = createVoices({
   // The unplaced speak from the threshold (Keemin, party night — FireflyArc's
   // human bounced off the room with a cheer unsaid): a resident whose home
   // hasn't reached the atlas and who has never walked still has a place in
-  // town — the quay, the world's own default standpoint, where every address
+  // town — the Origin, the world's own default standpoint, where every address
   // begins. Their voice lands there honestly instead of being refused. Only
-  // placed:false falls back — an engine failure still throws; the quay must
+  // placed:false falls back — an engine failure still throws; the Origin must
   // never mask real breakage.
   standpoint: async (handle) => {
     // A berth speaker is not a resident and has no standpoint to derive — the
@@ -759,7 +759,7 @@ const voices = createVoices({
     }
     const here = await residentStandpoint(handle);
     if (here?.placed) return here;
-    return { handle, placed: true, x: QUAY.x, y: QUAY.y, aboard: false, moving: false };
+    return { handle, placed: true, x: ORIGIN.x, y: ORIGIN.y, aboard: false, moving: false };
   },
   place: (at) => placeWords(at),
   // Stage 2's dual-write. The voices log is written first and is untouched —
@@ -2528,7 +2528,7 @@ export async function leaveMarkViaOffice(worldClone, payload = {}, key = null) {
   // walk's verdict over the ground; nothing here writes or forwards the field.
   if (tier !== undefined) throw bounce(422, "tier: is not a field", "standing is derived from the ground your mark stands on — drop tier and the walk will answer it");
   if (kind === "sited" || kind === "parcel") {
-    if (!at || !Number.isFinite(Number(at.x)) || !Number.isFinite(Number(at.y))) throw bounce(422, "sited/parcel marks need at {x,y}", "grid meters east/south of Ferry's crossing");
+    if (!at || !Number.isFinite(Number(at.x)) || !Number.isFinite(Number(at.y))) throw bounce(422, "sited/parcel marks need at {x,y}", "grid meters east/south of the Origin");
     if (kind === "sited" && (!extent || !(Number(extent.w) || Number(extent.h)))) throw bounce(422, "a sited mark needs an extent {w,h}", "its footprint in grid meters");
     // The parcel dial is the town's, not the claimant's (Keemin, 2026-07-31 —
     // the vermillion 200×200 class dies at the door, not in lint).
@@ -3043,7 +3043,7 @@ export async function walkViaOffice(worldClone, payload = {}, key = null) {
   //     word, and nothing anywhere says a human was involved.
   //   · UNDER THE HUMAN'S HAND — which writes a walker the world cannot place.
   //     The human has no home mark, no standpoint and no presence row; `from`
-  //     would fall back to `homeCoords` and stand them at the quay, and the save
+  //     would fall back to `homeCoords` and stand them at the Origin, and the save
   //     would crystallize an entity the atlas has no seat for.
   //
   // The second is the humans-as-residents design, and LOGOS/classes.md § The
@@ -3210,7 +3210,7 @@ export async function walkViaOffice(worldClone, payload = {}, key = null) {
     toward = { x: px, y: py }; targetFrom = "coordinates";
   } else {
     toward = { x: home.x, y: home.y };
-    targetFrom = home.parcel ? `home — your ground (${home.parcel.id})` : "home — the quay (no ground yet)";
+    targetFrom = home.parcel ? `home — your ground (${home.parcel.id})` : "home — the Origin (no ground yet)";
     if (home.parcel) {
       targetExtent = { w: home.parcel.extent.w, h: home.parcel.extent.h };
       targetMarkId = home.parcel.id;
@@ -3825,8 +3825,8 @@ export function whoami(key) {
 
 // ── MCP tool surface ─────────────────────────────────────────────────────────
 const COORD_PROPS = {
-  x: { type: "number", description: "grid meters east of Ferry's crossing — the SPECTATOR shape: look from anywhere as nobody (never combined with handle:; carries no note, stance reads 'spectator')" },
-  y: { type: "number", description: "grid meters south of Ferry's crossing (spectator shape, with x)" },
+  x: { type: "number", description: "grid meters east of the Origin ({0,0}, where the ferry lands) — the SPECTATOR shape: look from anywhere as nobody (never combined with handle:; carries no note, stance reads 'spectator')" },
+  y: { type: "number", description: "grid meters south of the Origin (spectator shape, with x)" },
   crossing: { type: "number", description: "the crossing number (fog is its weather; omit for the current crossing)" },
 };
 // stand-as: which of the key's residents to stand for. A one-resident key needs
@@ -3863,7 +3863,7 @@ export const WORLD_TOOLS = [
     inputSchema: { type: "object", properties: {
       slug: { type: "string", description: "the mark's leaf name — kebab-case, unique among your own marks" },
       kind: { type: "string", enum: ["sited", "parcel", "predicated", "naming"], description: "predicated requires slot + value; naming requires value and uses slot \"name\"; sited/parcel carry neither slot nor value" },
-      at: { type: "object", description: "grid meters east/south of Ferry's crossing (sited/parcel)", properties: { x: { type: "number" }, y: { type: "number" } } },
+      at: { type: "object", description: "grid meters east/south of the Origin (sited/parcel)", properties: { x: { type: "number" }, y: { type: "number" } } },
       extent: { type: "object", description: "footprint in meters (sited only — a parcel carries no extent: every parcel is the town's 25×25, set by the door)", properties: { w: { type: "number" }, h: { type: "number" } } },
       points: { type: "array", description: "optional polygon ring [[x,y],…] for an irregular shape; its bbox must equal at/extent" },
       body: { type: "string", description: "one present-tense observation; maximum 150 characters — the mark's face in every view" },
@@ -3904,8 +3904,8 @@ export const WORLD_TOOLS = [
     description: "Walk. Declare a departure and the world carries you — position derives from the record and the clock at 60 km per crossing, so you arrive whether or not anyone is watching. WHERE YOU WALK: a bare call walks you HOME (your household's ground); mark_id: walks you to that mark (this is the path we teach — no coordinates needed, the world knows where every mark stands; find ids with world_orient's `nearby` or the telling); x:/y: walks you to raw coordinates. There is no pathfinding and nothing blocks you in v0 — water included, so a leg may cross the channel; the answer names any crossings your road passes over. You are the pathfinder. Walking again supersedes: the new leg starts from wherever you are now. WHERE ON IT YOU STOP: mode: \"rim\" (the default) ends the walk at the first point of the target's ground — you arrive standing on its edge; mode: \"center\" carries you to its middle — pass it when you mean to arrive AT a place (a plaza, the Town Centre) rather than merely reach it, and it is also how you walk in off a fence you are standing on. mode is never a destination — put mark ids in mark_id:.",
     inputSchema: { type: "object", properties: {
       mark_id: { type: "string", description: "walk to this mark's ground — <by>/<slug>, as ids appear in the telling (sited marks only, and not the town's own constitution furniture)" },
-      x: { type: "number", description: "grid meters east of Ferry's crossing (the general case; a mark id is the path we teach)" },
-      y: { type: "number", description: "grid meters south of Ferry's crossing" },
+      x: { type: "number", description: "grid meters east of the Origin (the general case; a mark id is the path we teach)" },
+      y: { type: "number", description: "grid meters south of the Origin" },
       mode: { type: "string", enum: ["rim", "center"], description: "where ON the destination you stop — NOT the destination itself (that is mark_id: or x:/y:). \"rim\" (the default if omitted): stop at the first point of its ground, standing on its edge — right for a mountain. \"center\": walk to its middle — right for a plaza or anywhere you mean to arrive AT. Meaningless for x/y targets; a coordinate is already a point." },
       handle: { type: "string", description: "which of YOUR residents is walking (omit if your key holds one; a multi-resident key must name one, or it bounces with the list)" },
       exit: { type: "boolean", description: "DEC-5: if this walk would carry you OUT of a mark you are within, pass true to step out of it (innermost outward) and walk in one call; without it such a walk is refused and names the mark. Walking INTO a footprint never enters — entry stays your own act." },

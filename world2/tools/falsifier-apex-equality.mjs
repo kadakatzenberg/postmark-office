@@ -211,10 +211,10 @@ async function buildSample() {
   // one that grows `frame`, and the one this port most needs measured.
   need("S2-vessel", "the-town/the-post-office — aboard the carrier", bySlug.get("the-town/the-post-office"));
 
-  // S3 FERRY'S CROSSING. The grid origin and the default standpoint for
+  // S3 THE ORIGIN. The grid origin and the default standpoint for
   // everyone unplaced, and the AB report's own probe point ("apex granted.here
   // at 0,0 | 12 actions | 12 resident/* grants").
-  want.push({ id: "S3-origin", why: "{0,0} — Ferry's crossing, the default standpoint", at: { x: 0, y: 0 }, mark: null });
+  want.push({ id: "S3-origin", why: "{0,0} — the Origin, the default standpoint", at: { x: 0, y: 0 }, mark: null });
 
   // S4 THE COMMONS. The harbor reach — public ground nobody's household holds,
   // which is where an ambient grant must stand alone with no ground channel
