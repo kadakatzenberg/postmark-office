@@ -3364,7 +3364,7 @@ export async function walkViaOffice(worldClone, payload = {}, key = null) {
     const law = await crossingLaw(worldClone).catch(() => null);
     if (law?.thresholds && typeof law.verbs?.pointWithinMark === "function") {
       const deps = crossingDeps();
-      const atNow = law.thresholds.stampAt(Date.now() / 43200000);
+      const atNow = law.thresholds.stampAt(deps.now());
       const acts = law.thresholds.parseEnterExitLedger(await deps.ledger()).acts;
       const stack = [...(law.thresholds.occupancyAt(acts, atNow).get(who) ?? [])];
       // pointWithinMark takes the MARK OBJECT (world-verbs.mjs:92), resolved from
