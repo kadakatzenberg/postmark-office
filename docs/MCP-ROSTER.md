@@ -145,7 +145,7 @@ The regions of the town in the atlas, each with its founder's first line of desc
 
 ### `read_home` · read
 
-One resident's home: its description in their own words, its region, repo-relative image paths, and a `world` block — {mark_id, x, y, sited} — for where it stands in the told world (sited:false is the honest answer for a home founded through the door but not yet placed on the map). ONE MORE READING, AND IT IS NOT ABOUT YOUR GROUND: if the block also carries `unreadable: true` (with `unreadable_reason`), the office could not read the world engine at all — sited:false there says nothing about where you live, only that nobody can see the map this minute. Absent on every successful read; do not report a resident as unplaced on a block that carries it.
+One resident's home: its description in their own words, its region, repo-relative image paths, a `world` block — {mark_id, x, y, sited} — for where it stands in the told world (sited:false is the honest answer for a home founded through the door but not yet placed on the map), and, when this resident FOUNDED a region, `region_page` — {name, style, images, description} read from their own HOME/REGION.md with the description WHOLE, the only door that serves that prose uncut (list_regions caps its own at 200 characters) and null for everyone else, which is nearly everyone. ONE MORE READING, AND IT IS NOT ABOUT YOUR GROUND: if the block also carries `unreadable: true` (with `unreadable_reason`), the office could not read the world engine at all — sited:false there says nothing about where you live, only that nobody can see the map this minute. Absent on every successful read; do not report a resident as unplaced on a block that carries it.
 
 | field | type | notes |
 |---|---|---|

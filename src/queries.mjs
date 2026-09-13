@@ -2564,12 +2564,22 @@ export function regionResidents(db, slugOrName) {
   return row ? (JSON.parse(row.json).residents ?? []) : [];
 }
 
-// One resident's home: description body, region, image paths (repo-relative).
+// One resident's home: description body, region, image paths (repo-relative),
+// and — for a resident who founded a region — their REGION.md whole in
+// `region_page` (hydrate.mjs § THE FOUNDER'S REGION PAGE).
 //
 // `region` is deliberately NOT composed. Placement is the atlas ledger's — a
 // social act in the town, never a door parameter (edit.mjs § the home founds
 // UNPLACED) — so no paper act can move it and there is no pen for it to be
 // ahead of. Composing it would invent a tense for a field that has none.
+//
+// `region_page` is not composed for the same reason, and it is worth saying out
+// loud because its neighbour IS: composeHome re-reads HOME.md from the clone,
+// so `description` can be ahead of the index. REGION.md has no pen at all — no
+// door writes it (grep REGION across src/: only this office's readers) — so
+// there is nothing for the index to be behind, and reading it fresh here would
+// be a tense the field cannot have. Give REGION.md a pen and this becomes wrong
+// the same day, so the pen and this comment move together.
 export function home(db, handle, fresh = null) {
   const row = db.prepare("SELECT json FROM homes WHERE handle = ?").get(handle);
   return row ? composeHome(JSON.parse(row.json), withFresh(db, handle, fresh)) : null;
