@@ -26,13 +26,16 @@ const worldBlock = async () => ({ sited: true, unreadable: false });
 const ctx = (extra = {}) => ({ db, worldBlock, schemas: SCHEMAS, schemaRequired: REQUIRED, ...extra });
 const send = (answer) => answer.acts.find((a) => a.act === "send");
 
-test("MCP send affordance advertises the accepted nonce without widening REST", async () => {
+test("MCP send affordance advertises the accepted nonce without widening REST or generic slim reads", async () => {
   const rest = await householdApex({}, KEY, ctx());
-  const mcp = await householdApex({}, KEY, ctx({ slim: true }));
-  const card = await householdApex({ read: "send" }, KEY, ctx({ slim: true }));
+  const slimOnly = await householdApex({}, KEY, ctx({ slim: true }));
+  const mcp = await householdApex({}, KEY, ctx({ slim: true, advertiseRetryNonce: true }));
+  const card = await householdApex({ read: "send" }, KEY, ctx({ slim: true, advertiseRetryNonce: true }));
 
   assert.equal("nonce" in send(rest).fields, false,
     "the frozen REST send surface stays unchanged");
+  assert.equal("nonce" in send(slimOnly).fields, false,
+    "slim alone does not widen bundled morning-page surfaces");
   assert.equal("nonce" in send(mcp).fields, true,
     "the MCP capability index advertises the retry key the door already accepts");
   assert.equal("nonce" in card.card.fields, true,
