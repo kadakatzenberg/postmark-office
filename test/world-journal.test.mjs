@@ -327,17 +327,17 @@ test("the-anchor — a mark, an entity, or the world; and the offset survives th
   assert.deepEqual(composeAnchor(world, centreOf), nowhere);
 });
 
-test("the-anchor — an unplaced actor gets a NULL offset, never Ferry's crossing", () => {
+test("the-anchor — an unplaced actor gets a NULL offset, never the Origin", () => {
   // {x:0,y:0} is a real place somebody could be standing. A deriver that
   // substitutes it for "we do not know" is the customs-house law broken:
   // REFUSE OR DISCLOSE, NEVER QUIETLY SUBSTITUTE.
   const unplaced = anchorAt(null, { chain: [], centreOf });
   assert.equal(unplaced.unplaced, true);
-  assert.equal(unplaced.dx, null, "not zero — zero is Ferry's crossing");
+  assert.equal(unplaced.dx, null, "not zero — zero is the Origin");
   assert.equal(composeAnchor(unplaced, centreOf), null, "and nothing composes a position out of it");
 });
 
-test("the-witnessed-line — an UNPLACED actor's line keeps a null offset; the store never writes Ferry's crossing", () => {
+test("the-witnessed-line — an UNPLACED actor's line keeps a null offset; the store never writes the Origin", () => {
   // The law says the line carries where the actor stood. It does not license
   // inventing one. Number(null) is 0 and 0 is finite, so the guard has to be
   // explicit at the WRITE too, not only at the read — a constitutional line

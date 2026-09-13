@@ -156,7 +156,7 @@ function pointOf(searchParams) {
   const x = Number(xs), y = Number(ys);
   if (!Number.isFinite(x) || !Number.isFinite(y)) {
     return { error: { code: 422, body: { error: "bounce", defect: "x and y must both be numbers",
-      hint: "?x=<m>&y=<m> — the town's grid, metres from Ferry's crossing" } } };
+      hint: "?x=<m>&y=<m> — the town's grid, metres from the Origin" } } };
   }
   const r = Number(searchParams.get("radius"));
   const l = Number(searchParams.get("limit"));
@@ -645,7 +645,7 @@ export async function world2Apex(searchParams, { p: injected = null } = {}) {
   const near = pointOf(searchParams);
   if (near?.error) return { error: near.error };
   if (!near) return bounce(422, "an apex answer is taken from somewhere",
-    "?x=<m>&y=<m> — the town's grid, metres from Ferry's crossing. This is the keyless spectator read; the embodied one is 1.0's `world {}` verb with a key.");
+    "?x=<m>&y=<m> — the town's grid, metres from the Origin. This is the keyless spectator read; the embodied one is 1.0's `world {}` verb with a key.");
   const askedCrossing = Number(searchParams?.get("crossing"));
   const n = Number.isFinite(askedCrossing) ? askedCrossing : currentCrossing();
 

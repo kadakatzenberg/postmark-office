@@ -64,9 +64,9 @@ test("chooseStandpoint: an explicit handle must be one the key holds (scope)", (
   assert.match(bad.bounce.defect, /not one of your residents/);
 });
 
-test("chooseStandpoint: keyless and visitor stand at the quay", () => {
-  assert.equal(chooseStandpoint({}, null).coords.from, "the quay (Ferry's crossing)");
-  assert.equal(chooseStandpoint({}, visitor).coords.from, "the quay (Ferry's crossing)");
+test("chooseStandpoint: keyless and visitor stand at the Origin", () => {
+  assert.equal(chooseStandpoint({}, null).coords.from, "the Origin");
+  assert.equal(chooseStandpoint({}, visitor).coords.from, "the Origin");
 });
 
 test("worldOrient / worldEyes surface the bounce before the engine loads", async () => {

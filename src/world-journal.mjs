@@ -219,7 +219,7 @@ const idPartsOf = (record) => {
  * needs both) and hands it over, the way `positions.mjs` takes its frames.
  *
  * A point that cannot be read at all returns the world anchor with a null
- * offset rather than a zero one: `{x:0,y:0}` is Ferry's crossing, a real place
+ * offset rather than a zero one: `{x:0,y:0}` is the Origin, a real place
  * somebody could be standing, and a deriver that substitutes it for "unknown" is
  * the exact quiet substitution the customs-house law forbids.
  */
@@ -241,7 +241,7 @@ export function anchorAt(point, { chain = [], centreOf = null } = {}) {
 export function composeAnchor({ anchor, dx, dy }, centreOf = null) {
   // `dx == null` FIRST, and not folded into the isFinite check: Number(null) is
   // 0, not NaN, so an unplaced actor's null offset would compose to {0,0} —
-  // Ferry's crossing, a real place somebody could be standing. That is the
+  // the Origin, a real place somebody could be standing. That is the
   // quiet substitution the whole anchor pair exists to prevent, and it is the
   // defect the-anchor's own falsifier caught here.
   if (dx == null || dy == null) return null;
@@ -530,7 +530,7 @@ export function actLogNameFor(env = process.env) {
  *
  * Every trap the insert path knew is in here, unchanged and still commented at
  * its line — most of all the `== null` FIRST ordering, which is the difference
- * between "the world, position unknown" and Ferry's crossing.
+ * between "the world, position unknown" and the Origin.
  */
 export function normalizeRow(entry = {}) {
   const {
@@ -574,7 +574,7 @@ export function normalizeRow(entry = {}) {
     at_anchor: at?.anchor ?? null,
     // `== null` FIRST, the third instance of the same trap in this file:
     // Number(null) is 0 and 0 is finite, so an UNPLACED actor's null offset
-    // would be stored as {0,0} — Ferry's crossing, a real place, written onto a
+    // would be stored as {0,0} — the Origin, a real place, written onto a
     // constitutional line as where somebody stood. A null offset beside a real
     // anchor says "the world, position unknown", which is the truth.
     at_dx: at?.dx == null || !Number.isFinite(Number(at.dx)) ? null : Number(at.dx),
