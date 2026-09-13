@@ -337,9 +337,15 @@ if (existsSync(placementsPath)) {
       .filter((h) => byHandle.has(h)).sort();
     const images = (Array.isArray(holder?.region?.data?.assets) ? holder.region.data.assets : [])
       .map((a) => `WHITE_PAGES/${rf.holder}/HOME/${a}`);
+    // `style` is the founder's own one-line rendering note from REGION.md's
+    // frontmatter, and it is here because GET /regions/{slug} serves it: the
+    // row already carried every other field that door answers, `body` whole
+    // included. Null when the holder wrote no REGION.md (or wrote one without
+    // the key) — the same silence the empty `body` keeps for them.
     insRegion.run(rf.id, name, JSON.stringify({
       id: rf.id, name, holder: rf.holder, bearing: rf.bearing, band: rf.band,
       status: rf.status, body: holder?.region?.body ?? "", images, residents,
+      style: holder?.region?.data?.style ?? null,
     }));
   }
 

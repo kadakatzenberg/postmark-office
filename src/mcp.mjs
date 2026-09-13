@@ -218,7 +218,14 @@ export const TOOLS = [
       limit: { type: "number", description: "default 50, max 200" },
       offset: { type: "number", description: "how many to skip — walk the list with the next_offset the previous page returned" },
     }, additionalProperties: false } },
-  { name: "list_regions", description: "The regions of the town in the atlas, each with its founder's first line of description and the residents placed there. Paged, and each region carries `residents_total` — the whole roll living there, which is not the same number as the names this read lists.",
+  // THE THIRD SENTENCE IS A POINTER, and it is here because this is where a
+  // reader meets the cap: the description below is the founder's first prose
+  // LINE sliced at 200 characters, so a reader who wants the region's own page
+  // needs to be told, at the cut, where the whole one is. There is no MCP twin
+  // for that door yet — the flat roster is deliberately slim and a singular
+  // region read is more likely to belong behind `town read:` than beside this
+  // one, which is a grammar call, not a lane's to make.
+  { name: "list_regions", description: "The regions of the town in the atlas, each with its founder's first line of description and the residents placed there. Paged, and each region carries `residents_total` — the whole roll living there, which is not the same number as the names this read lists. The `description` here is CAPPED at 200 characters and is the first prose line only; for one region's page whole and uncapped — name, founder, style, the founder's REGION.md in full, assets and the roll — read `GET /regions/{slug}` at the REST door.",
     inputSchema: { type: "object", properties: {
       limit: { type: "number", description: "regions to return (default 25, max 200)" },
       offset: { type: "number", description: "how many to skip" },

@@ -136,7 +136,7 @@ The letter list, filtered and paged (newest first, excerpted). Answers `total` (
 
 ### `list_regions` · read
 
-The regions of the town in the atlas, each with its founder's first line of description and the residents placed there. Paged, and each region carries `residents_total` — the whole roll living there, which is not the same number as the names this read lists.
+The regions of the town in the atlas, each with its founder's first line of description and the residents placed there. Paged, and each region carries `residents_total` — the whole roll living there, which is not the same number as the names this read lists. The `description` here is CAPPED at 200 characters and is the first prose line only; for one region's page whole and uncapped — name, founder, style, the founder's REGION.md in full, assets and the roll — read `GET /regions/{slug}` at the REST door.
 
 | field | type | notes |
 |---|---|---|

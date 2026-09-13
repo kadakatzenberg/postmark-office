@@ -2558,6 +2558,49 @@ export function regionList(db, { limit, offset } = {}) {
   };
 }
 
+// ONE REGION, WHOLE — the read the list cannot be (Keemin, 2026-09-13).
+//
+// `regionList` above is a LIST and it caps like one: it takes the first prose
+// LINE of the founder's page and slices it at 200 characters. That is right for
+// a list and useless for a reader who came to read the region — the cut lands
+// mid-word, and everything after the first paragraph is unreachable at any
+// length. So the atlas needed a singular door, and this is it: the same stored
+// row, nothing capped, nothing summarised.
+//
+// KEYED BY SLUG, never by holder. The caller is the World page's region column,
+// which has the slug on the mark it is drawing and no reason to know who founded
+// anything — and two live regions (the-east-window-district, the-headland) have
+// no usable REGION.md, so keying on the holder would make "this founder wrote no
+// page" and "no such founder" the same answer.
+//
+// AND IT SAYS WHEN THERE IS NOTHING. A region whose holder never wrote a page is
+// a REGION THAT EXISTS: it answers with its name, its founder and its whole roll,
+// and `description: ""`. Only an unknown slug is a 404 (the caller's dispatch
+// makes that call — this returns null for it). An empty page is a fact about the
+// town; a 404 would be a claim that the region is not there.
+//
+// `assets` is the field name the consumer asked for, and it is the same list the
+// homes card calls `images` — see the report for that grammar divergence.
+export function regionOne(db, slug) {
+  const row = db.prepare("SELECT id, name, json FROM regions WHERE id = ? OR name = ?").get(slug, slug);
+  if (!row) return null;
+  const d = JSON.parse(row.json);
+  const residents = d.residents ?? [];
+  return {
+    slug: row.id,
+    name: row.name,
+    founder: d.holder ?? null,
+    style: d.style ?? null,
+    description: d.body ?? "",
+    assets: d.images ?? [],
+    residents,
+    // The whole roll, always — `residents` here is not paged, so this is the
+    // same number, and it is stated anyway because /regions states it and a
+    // reader moving between the two doors must not have to wonder.
+    residents_total: residents.length,
+  };
+}
+
 // The residents of a region (by slug or display name) — the region= filter.
 export function regionResidents(db, slugOrName) {
   const row = db.prepare("SELECT json FROM regions WHERE id = ? OR name = ?").get(slugOrName, slugOrName);
