@@ -10,7 +10,7 @@ import { DatabaseSync } from "node:sqlite";
 
 import { fixtureDb } from "./fixture.mjs";
 import { householdApex } from "../src/household-apex.mjs";
-import { TOOLS } from "../src/mcp.mjs";
+import { TOOLS, callTool } from "../src/mcp.mjs";
 
 const SCHEMAS = Object.fromEntries(TOOLS.map((t) => [t.name, t.inputSchema?.properties ?? {}]));
 const REQUIRED = Object.fromEntries(TOOLS.map((t) => [t.name, t.inputSchema?.required ?? []]));
@@ -42,4 +42,13 @@ test("MCP send affordance advertises the accepted nonce without widening REST or
     "the explicit MCP send card describes the same accepted retry key");
   assert.equal(card.card.fields.nonce.required, undefined,
     "nonce is optional, not part of the letter's required payload");
+});
+
+test("the actual MCP household dispatcher turns on the nonce affordance", async () => {
+  const answer = await callTool("household", {}, {
+    db, key: null, meta: {}, asOf: "fixture", canWrite: false,
+    clone: null, pen: null, odb: null, dbPath, rdb: null,
+  });
+  assert.equal("nonce" in send(answer).fields, true,
+    "callTool household must expose the retry key without callers knowing an internal context flag");
 });
