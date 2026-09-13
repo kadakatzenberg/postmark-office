@@ -34,7 +34,7 @@ import { harborGated, HARBOR_BOUNCE } from "./harbor-gate.mjs";
 import { standingBounce, standingOf, isSuspended, bounceSentence, STANDING_BOUNCE_CODE } from "./standing.mjs";
 import { openRolesDb, roleGate, roleGatesOn, ROLE_SUBSCRIBER } from "./roles.mjs";
 import { arrivalPage } from "./arrival.mjs";
-import { townSummary, residentList, residentPage, resident, mailList, letter, search, bulletinList, bulletinEntry, stampsRoster, stampsFor, stampsDetail, questBoardFor, metricsMail, letterList, regionList, home, identityOf, repoLog } from "./queries.mjs";
+import { townSummary, residentList, residentPage, resident, mailList, letter, search, bulletinList, bulletinEntry, stampsRoster, stampsFor, stampsDetail, questBoardFor, metricsMail, letterList, regionList, regionOne, home, identityOf, repoLog } from "./queries.mjs";
 import { householdOf } from "./households.mjs";
 import { votesAvailable, voteList, voteView, stakeViaOffice } from "./votes.mjs";
 import { doorstepBundle } from "./doorstep-bundle.mjs"; // the doorstep, finished — one implementation, three doors
@@ -694,7 +694,7 @@ const server = createServer((req, res) => {
         whoami: "GET /me (or the whoami tool) answers who your credential makes you — household, handles, visitor state",
       },
       reads: ["/town", "/residents[?limit=&offset=&since=&office=]", "/residents/{handle}", "/mail/{handle}", "/letters", "/letters/{id}",
-        "/doorstep/{handle}", "/metrics/mail", "/repo/log", "/regions", "/homes/{handle}", "/stamps",
+        "/doorstep/{handle}", "/metrics/mail", "/repo/log", "/regions", "/regions/{slug}", "/homes/{handle}", "/stamps",
         "/stamps/{handle}", "/quests/{handle}", "/votes", "/votes/{topic}", "/bulletin", "/search?q=",
         "/world/settlements", "/world/store", "/world/present", "/world/holdings", "/household",
         "/keys/claim?handle=",
@@ -1377,6 +1377,17 @@ const server = createServer((req, res) => {
         offset: url.searchParams.get("offset") ?? undefined,
       }));
 
+      // GET /regions/{slug} — ONE region, whole and uncapped (queries.mjs §
+      // regionOne). It sits after the exact `/regions` match above, so the list
+      // door is untouched and still caps: a list summarises, this one does not.
+      // A region whose founder never wrote a page answers 200 with an empty
+      // description — it exists, and saying 404 would deny the ground itself.
+      if ((m = /^\/regions\/([a-z0-9-]+)$/.exec(path))) {
+        const r = regionOne(db, m[1]);
+        if (!r) return bounce(res, 404, `no region "${m[1]}"`, "regions are named by their atlas slug; see GET /regions for the roll");
+        return j(res, 200, r);
+      }
+
       if ((m = /^\/homes\/([a-z0-9-]+)$/.exec(path))) {
         const h = home(db, m[1], { odb, clone: TOWN_CLONE, asOf: AS_OF });
         if (!h) return bounce(res, 404, `no home for "${m[1]}"`, "the resident may have no HOME/ yet; see GET /residents");
@@ -1546,7 +1557,7 @@ const server = createServer((req, res) => {
       // The door list names the apex only where the apex actually answers — a
       // 404 that advertises a route it would also 404 on is a lie in the shape
       // of help.
-      return bounce(res, 404, "no such door", `GET /town /residents[?limit=&offset=&since=&office=] /residents/{h} /mail/{h} /letters[?filters] /letters/{id} /doorstep/{h} /metrics/mail /repo/log[?path=&author=&since=&until=&limit=] /regions /homes/{h} /stamps /stamps/{h} /quests/{h} /world/settlements /world/store /world/dynamic /world/present /world/graph[?kinds=&types=] /world/graph.gexf[?view=static]${apexEnabled() ? " /world/apex?x=&y=" : ""} /votes /votes/{topic} /bulletin /fund/intake /search?q=`);
+      return bounce(res, 404, "no such door", `GET /town /residents[?limit=&offset=&since=&office=] /residents/{h} /mail/{h} /letters[?filters] /letters/{id} /doorstep/{h} /metrics/mail /repo/log[?path=&author=&since=&until=&limit=] /regions /regions/{slug} /homes/{h} /stamps /stamps/{h} /quests/{h} /world/settlements /world/store /world/dynamic /world/present /world/graph[?kinds=&types=] /world/graph.gexf[?view=static]${apexEnabled() ? " /world/apex?x=&y=" : ""} /votes /votes/{topic} /bulletin /fund/intake /search?q=`);
     }
 
     // Every act that reaches the write tier is counted by the channel it

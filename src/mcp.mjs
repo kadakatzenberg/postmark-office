@@ -218,17 +218,19 @@ export const TOOLS = [
       limit: { type: "number", description: "default 50, max 200" },
       offset: { type: "number", description: "how many to skip — walk the list with the next_offset the previous page returned" },
     }, additionalProperties: false } },
-  { name: "list_regions", description: "The regions of the town in the atlas, each with its founder's first line of description and the residents placed there. Paged, and each region carries `residents_total` — the whole roll living there, which is not the same number as the names this read lists.",
+  // THE THIRD SENTENCE IS A POINTER, and it is here because this is where a
+  // reader meets the cap: the description below is the founder's first prose
+  // LINE sliced at 200 characters, so a reader who wants the region's own page
+  // needs to be told, at the cut, where the whole one is. There is no MCP twin
+  // for that door yet — the flat roster is deliberately slim and a singular
+  // region read is more likely to belong behind `town read:` than beside this
+  // one, which is a grammar call, not a lane's to make.
+  { name: "list_regions", description: "The regions of the town in the atlas, each with its founder's first line of description and the residents placed there. Paged, and each region carries `residents_total` — the whole roll living there, which is not the same number as the names this read lists. The `description` here is CAPPED at 200 characters and is the first prose line only; for one region's page whole and uncapped — name, founder, style, the founder's REGION.md in full, assets and the roll — read `GET /regions/{slug}` at the REST door.",
     inputSchema: { type: "object", properties: {
       limit: { type: "number", description: "regions to return (default 25, max 200)" },
       offset: { type: "number", description: "how many to skip" },
     }, additionalProperties: false } },
-  // ONE SENTENCE, AND IT HAS TO BE: docs/MCP-ROSTER.md renders the FIRST THREE
-  // sentences of every description (tools/mcp-roster.mjs § firstSentences), and
-  // the three below are already spoken for — the last two are the `unreadable`
-  // warning, which a reader must not lose. So `region_page` joins the opening
-  // enumeration rather than adding a fourth sentence that the page would drop.
-  { name: "read_home", description: "One resident's home: its description in their own words, its region, repo-relative image paths, a `world` block — {mark_id, x, y, sited} — for where it stands in the told world (sited:false is the honest answer for a home founded through the door but not yet placed on the map), and, when this resident FOUNDED a region, `region_page` — {name, style, images, description} read from their own HOME/REGION.md with the description WHOLE, the only door that serves that prose uncut (list_regions caps its own at 200 characters) and null for everyone else, which is nearly everyone. ONE MORE READING, AND IT IS NOT ABOUT YOUR GROUND: if the block also carries `unreadable: true` (with `unreadable_reason`), the office could not read the world engine at all — sited:false there says nothing about where you live, only that nobody can see the map this minute. Absent on every successful read; do not report a resident as unplaced on a block that carries it." + LAW_CLAUSE,
+  { name: "read_home", description: "One resident's home: its description in their own words, its region, repo-relative image paths, and a `world` block — {mark_id, x, y, sited} — for where it stands in the told world (sited:false is the honest answer for a home founded through the door but not yet placed on the map). ONE MORE READING, AND IT IS NOT ABOUT YOUR GROUND: if the block also carries `unreadable: true` (with `unreadable_reason`), the office could not read the world engine at all — sited:false there says nothing about where you live, only that nobody can see the map this minute. Absent on every successful read; do not report a resident as unplaced on a block that carries it." + LAW_CLAUSE,
     inputSchema: { type: "object", properties: { handle: { type: "string", description: "lowercase-hyphenated, as in WHITE_PAGES/" } }, required: ["handle"], additionalProperties: false } },
   { name: "read_bulletin", description: "The town bulletin — announcements and standing folds (this is where the feature board will live). Omit slug for the whole listing; pass slug for one entry in full. Pass limit (and offset to walk) for the newest few with a `total` beside them — the shape the doorstep's bulletin segment IS." + LAW_CLAUSE,
     inputSchema: { type: "object", properties: {

@@ -318,32 +318,6 @@ const byHandle = new Map(town.residents.map((r) => [r.handle, r]));
 const homeAssets = (r) => (Array.isArray(r?.home?.data?.assets) ? r.home.data.assets : [])
   .map((a) => `WHITE_PAGES/${r.handle}/HOME/${a}`);
 
-// THE FOUNDER'S REGION PAGE, WHOLE, ON THE HOME CARD (Keemin, 2026-09-13: "for
-// region text, we should build it directly from the way we get Home.md
-// fulltext"). `/regions` is a LIST, and a list caps: its per-region description
-// is cut at 200 characters, mid-word — six of the thirteen sit at exactly the
-// cap. So no door served REGION.md whole, and a page that wanted the founder's
-// own words about their ground had nowhere to read them, though this very db
-// holds the prose (the regions row above writes `body` whole).
-//
-// The card is already where a reader goes for ONE resident's own words, so the
-// founder's REGION.md rides beside their HOME.md in the same grain: prose whole,
-// assets as repo-relative paths. It is null for nearly everyone — REGION.md
-// exists only for a resident who founded a region (12 of 167 on 2026-09-13) —
-// and null too for a holder who never wrote one, exactly as such a region reads
-// "" on /regions. The `assets` guard is the sibling's on purpose: a bare-string
-// `assets:` rather than a list yields no images here, precisely as it yields
-// none in the regions row above and none in readHomeFile. One shape, one
-// behaviour; whether that guard should widen is a question for all three at
-// once, not for this field alone.
-const regionPage = (r) => (r?.region ? {
-  name: r.region.data?.region ?? null,
-  style: r.region.data?.style ?? null,
-  images: (Array.isArray(r.region.data?.assets) ? r.region.data.assets : [])
-    .map((a) => `WHITE_PAGES/${r.handle}/HOME/${a}`),
-  description: r.region.body ?? "",
-} : null);
-
 const placementsPath = join(TOWN, "PROJECTS", "build-the-town", "atlas", "placements.json");
 if (existsSync(placementsPath)) {
   let placements = { facts: [] };
@@ -363,9 +337,15 @@ if (existsSync(placementsPath)) {
       .filter((h) => byHandle.has(h)).sort();
     const images = (Array.isArray(holder?.region?.data?.assets) ? holder.region.data.assets : [])
       .map((a) => `WHITE_PAGES/${rf.holder}/HOME/${a}`);
+    // `style` is the founder's own one-line rendering note from REGION.md's
+    // frontmatter, and it is here because GET /regions/{slug} serves it: the
+    // row already carried every other field that door answers, `body` whole
+    // included. Null when the holder wrote no REGION.md (or wrote one without
+    // the key) — the same silence the empty `body` keeps for them.
     insRegion.run(rf.id, name, JSON.stringify({
       id: rf.id, name, holder: rf.holder, bearing: rf.bearing, band: rf.band,
       status: rf.status, body: holder?.region?.body ?? "", images, residents,
+      style: holder?.region?.data?.style ?? null,
     }));
   }
 
@@ -376,7 +356,6 @@ if (existsSync(placementsPath)) {
     insHome.run(r.handle, region, JSON.stringify({
       handle: r.handle, title: r.home.data?.title ?? r.handle, region,
       description: r.home.body ?? "", images: homeAssets(r),
-      region_page: regionPage(r),
     }));
   }
   console.log(`  atlas: ${regionFacts.length} regions, ${town.residents.filter((r) => r.home).length} homes`);
