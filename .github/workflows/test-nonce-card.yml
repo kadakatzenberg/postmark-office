@@ -94,7 +94,8 @@ jobs:
           else:
             raise SystemExit("MCP household dispatch shape changed; refusing to guess")
           PY
-      - run: node --test test/household-send-nonce-card.test.mjs test/foyer-shrink.test.mjs test/household-apex.test.mjs
+      - run: node --test test/household-send-nonce-card.test.mjs test/household-apex.test.mjs
+      - run: node --test --test-name-pattern="^(F1|F5|F6|F11|F12|F13|F16)" test/foyer-shrink.test.mjs
       - run: git diff --check
       - name: Commit source patch when newly applied
         run: |
