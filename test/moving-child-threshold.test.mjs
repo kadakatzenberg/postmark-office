@@ -1,0 +1,109 @@
+// #2712 — a threshold nested in a carrier moves with that carrier.
+// The resident standpoint already composes through the carrier frame; the
+// threshold reach must compose through the same frame before measuring.
+
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { enterViaOffice } from "../src/world-crossings.mjs";
+
+const WHO = "sophia-familiaris";
+const SHIP_ID = "the-town/the-post-office";
+const key = { handles: new Set([WHO]) };
+
+function fakeLawClone() {
+  const dir = mkdtempSync(join(tmpdir(), "postmark-2712-"));
+  mkdirSync(join(dir, "tools"), { recursive: true });
+  writeFileSync(join(dir, "tools", "enter-exit.mjs"), `
+    export const stampAt = (x) => x;
+    export const parseEnterExitLedger = () => ({ acts: [] });
+    export const occupancyAt = () => new Map([["${WHO}", ["${SHIP_ID}"]]]);
+  `);
+  writeFileSync(join(dir, "tools", "world-verbs.mjs"), `
+    function pointInBox(pos, mark) {
+      if (Array.isArray(mark?.points) && mark.points.length >= 3) {
+        const pts = mark.points.map((p) => Array.isArray(p) ? { x: p[0], y: p[1] } : p);
+        const xs = pts.map((p) => Number(p.x)), ys = pts.map((p) => Number(p.y));
+        return Number(pos?.x) >= Math.min(...xs) && Number(pos?.x) <= Math.max(...xs)
+          && Number(pos?.y) >= Math.min(...ys) && Number(pos?.y) <= Math.max(...ys);
+      }
+      const x = Number(mark?.at?.x), y = Number(mark?.at?.y);
+      const w = Number(mark?.extent?.w), h = Number(mark?.extent?.h);
+      return Number(pos?.x) >= x - w / 2 && Number(pos?.x) <= x + w / 2
+        && Number(pos?.y) >= y - h / 2 && Number(pos?.y) <= y + h / 2;
+    }
+    export const pointWithinMark = pointInBox;
+    export function enter(state, targetId, world, { occupancy, handle }) {
+      const target = world.marks.find((m) => m.id === targetId);
+      if (!target) return { error: "missing target" };
+      const chain = ["${SHIP_ID}", targetId];
+      const held = occupancy.get(handle) ?? [];
+      const links = chain.filter((id) => !held.includes(id));
+      const standing = pointInBox(state, target);
+      return {
+        target: targetId, chain, links, held,
+        walk: standing || !links.length ? null : { to: { ...target.at }, mark: targetId },
+        crossings: links.map((id) => ({ mark: id, effect: "entered", terms: [] })),
+        rows: links.map((id) => handle + " enters " + id),
+        entered: links, within: [...held, ...links],
+        stranded: null, refused: null, awaiting: null,
+      };
+    }
+  `);
+  return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+function deps(world, here) {
+  return {
+    world: async () => world,
+    ledger: async () => "",
+    standpointOf: async () => ({ ...here, name: WHO }),
+    now: () => 185,
+    record: async ({ lines }) => ({
+      lines, within: [SHIP_ID, lines.at(-1)?.split(" ").at(-1)].filter(Boolean),
+      commit: "fixture", pushed: false,
+    }),
+  };
+}
+
+test("#2712 — an aboard resident can enter a child threshold at the carrier's live position", async (t) => {
+  const c = fakeLawClone(); t.after(c.cleanup);
+  const ship = { id: SHIP_ID, kind: "sited", at: { x: 0, y: 0 }, extent: { w: 10, h: 26 } };
+  const wheelhouse = { id: "the-town/the-wheelhouse", kind: "sited", at: { x: 0, y: 1 }, extent: { w: 4, h: 2 } };
+  const world = { marks: [ship, wheelhouse] };
+  // Carrier origin is now (1800, 400); Sophia stands at the wheelhouse's
+  // canonical +1 m y offset inside that moving frame.
+  const here = { x: 1800, y: 401, aboard: true, frame: SHIP_ID, frame_offset: { x: 0, y: 1 }, moving: false };
+  const answer = await enterViaOffice(c.dir, { mark: wheelhouse.id, handle: WHO }, key, deps(world, here));
+  assert.deepEqual(answer.entered, [wheelhouse.id]);
+  assert.equal(answer.walk_bundled, undefined, "no stale walk back to the canonical quay is returned after a live-frame admission");
+});
+
+test("#2712 — irregular child geometry is translated with its carrier, not just its anchor", async (t) => {
+  const c = fakeLawClone(); t.after(c.cleanup);
+  const ship = { id: SHIP_ID, kind: "sited", at: { x: 0, y: 0 }, extent: { w: 400, h: 400 } };
+  const gallery = {
+    id: "the-town/the-gallery", kind: "sited", at: { x: 0, y: 0 }, extent: { w: 200, h: 200 },
+    points: [[-100, -100], [100, -100], [100, 100], [-100, 100]],
+  };
+  const world = { marks: [ship, gallery] };
+  // 80 m from the translated anchor: outside the 60 m reach margin but
+  // inside the translated polygon. Moving only `at` would still refuse.
+  const here = { x: 1080, y: 1000, aboard: true, frame: SHIP_ID, frame_offset: { x: 80, y: 0 }, moving: false };
+  const answer = await enterViaOffice(c.dir, { mark: gallery.id, handle: WHO }, key, deps(world, here));
+  assert.deepEqual(answer.entered, [gallery.id]);
+});
+
+test("#2712 — a real refusal points at the child's live-frame coordinates", async (t) => {
+  const c = fakeLawClone(); t.after(c.cleanup);
+  const ship = { id: SHIP_ID, kind: "sited", at: { x: 0, y: 0 }, extent: { w: 500, h: 500 } };
+  const farDoor = { id: "the-town/the-far-door", kind: "sited", at: { x: 150, y: 0 }, extent: { w: 2, h: 2 } };
+  const world = { marks: [ship, farDoor] };
+  const here = { x: 1000, y: 1000, aboard: true, frame: SHIP_ID, frame_offset: { x: 0, y: 0 }, moving: false };
+  const e = await enterViaOffice(c.dir, { mark: farDoor.id, handle: WHO }, key, deps(world, here)).then(() => null, (err) => err);
+  assert.equal(e?.code, 409);
+  assert.deepEqual(e.walk?.to, { x: 1150, y: 1000 }, "the remedy follows the carrier instead of sending the resident to the stale canonical mark");
+  assert.match(e.hint ?? "", /\(1150, 1000\)/);
+});

@@ -75,6 +75,37 @@ function actorFrom(payload, key) {
   return who;
 }
 
+// A mark nested in the carrier a resident is riding has the same frame as the
+// resident. The fold keeps mark geometry in canonical world coordinates while
+// `movementStandpoint` composes the resident into the carrier's live position.
+// Measure those two in one frame: translate the target by the carrier's live
+// displacement, but ONLY when the world engine's own threshold chain says that
+// carrier is an ancestor of the target. No pathname or second containment rule.
+//
+// `frame_offset` is the resident's local point in the carrier, so
+// `here - frame_offset` is the carrier's live anchor. Irregular marks carry
+// absolute polygon vertices, so the same translation must move `points` too.
+function thresholdAtStandpointFrame(target, plan, here, marks) {
+  if (!target?.at || here?.aboard !== true || here?.moving === true || !here?.frame
+      || !Array.isArray(plan?.chain) || !plan.chain.includes(here.frame)) return target;
+  const frame = (marks ?? []).find((m) => m.id === here.frame);
+  const nums = [here.x, here.y, here.frame_offset?.x, here.frame_offset?.y, frame?.at?.x, frame?.at?.y, target.at.x, target.at.y].map(Number);
+  if (!nums.every(Number.isFinite)) return target;
+  const [hx, hy, lx, ly, fx, fy, tx, ty] = nums;
+  const dx = (hx - lx) - fx, dy = (hy - ly) - fy;
+  if (dx === 0 && dy === 0) return target;
+  const moved = { ...target, at: { ...target.at, x: tx + dx, y: ty + dy } };
+  if (Array.isArray(target.points)) {
+    moved.points = target.points.map((p) => {
+      const array = Array.isArray(p);
+      const x = Number(array ? p[0] : p?.x), y = Number(array ? p[1] : p?.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return p;
+      return array ? [x + dx, y + dy] : { ...p, x: x + dx, y: y + dy };
+    });
+  }
+  return moved;
+}
+
 /**
  * enter(mark) — the passage.
  *
@@ -143,9 +174,12 @@ export async function enterViaOffice(worldClone, payload = {}, key = null, deps 
   const target = answer.links?.length
     ? (w.marks ?? []).find((m) => m.id === (answer.target ?? markId)) ?? null
     : null;
-  if (target && answer.walk) {
-    const reach = standsWithin(here, target, { pointWithinMark: verbs.pointWithinMark });
+  const threshold = target ? thresholdAtStandpointFrame(target, answer, here, w.marks ?? []) : null;
+  let bundledWalk = answer.walk;
+  if (threshold && answer.walk) {
+    const reach = standsWithin(here, threshold, { pointWithinMark: verbs.pointWithinMark });
     if (!reach.stands) {
+      if (threshold !== target) bundledWalk = { ...answer.walk, to: { x: threshold.at.x, y: threshold.at.y } };
       // THE WALK RIDES THE REFUSAL AS A FIELD, NOT ONLY AS A SENTENCE
       // (founder-agreed 2026-09-11, with the world page's "walk there and enter"
       // button). The hint already names the coordinates, but a button that read
@@ -157,10 +191,14 @@ export async function enterViaOffice(worldClone, payload = {}, key = null, deps 
       // reading the sentence. It is the plan's object rather than one rebuilt
       // here on purpose — a second copy of the destination is a second answer to
       // "where is that door", and this door already has the first.
-      throw bounce(409, `you are not at that door — ${target.id} stands ~${reach.distance_round} m from where you stand`,
-        `a door is entered from within its reach (founder-ruled 2026-08-27; re-ruled 2026-09-11 to measure at the mark you NAMED, not the outermost link of its chain; R15 keeps walk and entry decoupled in both directions). Walk to (${target.at?.x}, ${target.at?.y}) and knock again; nothing was recorded`,
-        { walk: answer.walk });
+      throw bounce(409, `you are not at that door — ${threshold.id} stands ~${reach.distance_round} m from where you stand`,
+        `a door is entered from within its reach (founder-ruled 2026-08-27; re-ruled 2026-09-11 to measure at the mark you NAMED, not the outermost link of its chain; R15 keeps walk and entry decoupled in both directions). Walk to (${threshold.at?.x}, ${threshold.at?.y}) and knock again; nothing was recorded`,
+        { walk: bundledWalk });
     }
+    // The engine's bundled walk was computed against canonical mark geometry.
+    // If the only mismatch was that this target rides our current frame, the
+    // live-frame reach above has already established that we stand at the door.
+    if (threshold !== target) bundledWalk = null;
   }
 
   // TERMS SHOWN, NOTHING WRITTEN. A door that declares a counter-edge is asking
@@ -234,7 +272,7 @@ export async function enterViaOffice(worldClone, payload = {}, key = null, deps 
     chain: answer.chain, adjudications: answer.adjudications ?? answer.crossings,
     entered: answer.entered,
     within: written.within ?? [],
-    ...(answer.walk ? { walk_bundled: answer.walk } : {}),
+    ...(bundledWalk ? { walk_bundled: bundledWalk } : {}),
     ...(walkEnded ? { walk_ended: walkEnded } : {}),
     ...(answer.refused ? { refused: answer.refused, stranded_at: answer.stranded } : {}),
     ...(answer.awaiting ? { awaiting: answer.awaiting } : {}),
