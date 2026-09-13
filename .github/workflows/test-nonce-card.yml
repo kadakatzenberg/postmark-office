@@ -16,7 +16,7 @@ jobs:
         with:
           node-version: 24
       - run: npm install --no-audit --no-fund
-      - name: Apply minimal MCP-only nonce card patch
+      - name: Apply MCP-affordance-only nonce card patch
         run: |
           python - <<'PY'
           from pathlib import Path
@@ -37,7 +37,7 @@ jobs:
           }
           '''
 
-          new = '''function fieldsForAct(act, { schemas, schemaRequired, slim = false } = {}) {
+          new = '''function fieldsForAct(act, { schemas, schemaRequired, advertiseRetryNonce = false } = {}) {
             const spec = ACTS[act];
             if (!spec) return {};
             const strip = STANDPOINT_HANDLE_ACTS.has(act) ? new Set(["handle"]) : new Set();
@@ -47,7 +47,10 @@ jobs:
             const own = APEX_ONLY_FIELDS[act];
             if (own) return actionFields(own.properties, own.required, { strip });
             const fields = actionFields(schemas?.[spec.tool] ?? {}, schemaRequired?.[spec.tool] ?? [], { strip });
-            if (slim && act === "send") {
+            // The retry key belongs to the renegotiated MCP affordance, not to
+            // REST's frozen card shape and not to every surface that happens to
+            // use the foyer's `slim` transport flag (notably the doorstep).
+            if (advertiseRetryNonce && act === "send") {
               fields.nonce = {
                 type: "string",
                 description: "optional retry key for this send; the same nonce returns the first letter's receipt instead of writing a second letter",
@@ -60,32 +63,47 @@ jobs:
           if old in s:
             s = s.replace(old, new, 1)
             replacements = [
-              ('acts: capabilityIndex({ schemas, schemaRequired }),', 'acts: capabilityIndex({ schemas, schemaRequired, slim }),'),
+              ('const { db, clone, odb, dbPath, pen, schemas, schemaRequired, meta, asOf, canWrite, channel, slim = false } = ctx;',
+               'const { db, clone, odb, dbPath, pen, schemas, schemaRequired, meta, asOf, canWrite, channel, slim = false, advertiseRetryNonce = false } = ctx;'),
+              ('acts: capabilityIndex({ schemas, schemaRequired }),',
+               'acts: capabilityIndex({ schemas, schemaRequired, advertiseRetryNonce }),'),
               ('return { read: what, card: actCard(what, store.db, { schemas, schemaRequired }), reading_law: READING_LAW };',
-               'return { read: what, card: actCard(what, store.db, { schemas, schemaRequired, slim }), reading_law: READING_LAW };'),
+               'return { read: what, card: actCard(what, store.db, { schemas, schemaRequired, advertiseRetryNonce }), reading_law: READING_LAW };'),
               ('try { card = actCard(act, store.db, { schemas, schemaRequired }); } finally { store.db?.close(); }',
-               'try { card = actCard(act, store.db, { schemas, schemaRequired, slim }); } finally { store.db?.close(); }'),
+               'try { card = actCard(act, store.db, { schemas, schemaRequired, advertiseRetryNonce }); } finally { store.db?.close(); }'),
             ]
             for before, after in replacements:
               if before not in s:
-                raise SystemExit(f"expected source seam missing: {before}")
+                raise SystemExit(f"expected household seam missing: {before}")
               s = s.replace(before, after, 1)
             p.write_text(s)
-          elif 'function fieldsForAct(act, { schemas, schemaRequired, slim = false } = {}) {' in s:
-            print("source patch already present")
+          elif 'function fieldsForAct(act, { schemas, schemaRequired, advertiseRetryNonce = false } = {}) {' in s:
+            print("household patch already present")
           else:
             raise SystemExit("fieldsForAct source shape changed; refusing to guess")
+
+          p = Path("src/mcp.mjs")
+          s = p.read_text()
+          old = 'return householdApex(args, key, { db, clone, odb, dbPath, pen, canWrite, meta, asOf, slim: true, schemas: flatPropsMap(), schemaRequired: flatRequiredMap(), strictFields: true });'
+          new = 'return householdApex(args, key, { db, clone, odb, dbPath, pen, canWrite, meta, asOf, slim: true, advertiseRetryNonce: true, schemas: flatPropsMap(), schemaRequired: flatRequiredMap(), strictFields: true });'
+          if old in s:
+            s = s.replace(old, new, 1)
+            p.write_text(s)
+          elif new in s:
+            print("mcp patch already present")
+          else:
+            raise SystemExit("MCP household dispatch shape changed; refusing to guess")
           PY
-      - run: node --test test/household-send-nonce-card.test.mjs test/foyer-shrink.test.mjs
+      - run: node --test test/household-send-nonce-card.test.mjs test/foyer-shrink.test.mjs test/household-apex.test.mjs
       - run: git diff --check
       - name: Commit source patch when newly applied
         run: |
-          if git diff --quiet -- src/household-apex.mjs; then
+          if git diff --quiet -- src/household-apex.mjs src/mcp.mjs; then
             echo "source already committed"
             exit 0
           fi
           git config user.name "Sophia Familiaris"
           git config user.email "131329396+kadakatzenberg@users.noreply.github.com"
-          git add src/household-apex.mjs
+          git add src/household-apex.mjs src/mcp.mjs
           git commit -m "fix(household): advertise send nonce on MCP"
           git push origin HEAD:fix/mcp-send-nonce-card
