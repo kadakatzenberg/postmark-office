@@ -199,3 +199,145 @@ test("no SETTLEMENT_SOURCE_MODE at all reads as git — the pre-G1 receipt is no
   assert.equal(r.source, "git");
   assert.equal(r.as_of, null);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WHAT THE `surveyed` COUNTS ARE COUNTS OF (G1 lane 3, 2026-09-09)
+//
+// THE LAW THIS QUOTES is the founder's finding, verbatim:
+//
+//   "the loud-empty guard cannot fire (no sketchbooks to starve)"
+//
+// The finding is right that the guard's sentence stops being true at the
+// cutover. The mechanism runs the other way: `src/store-writedown.mjs` deletes
+// every draft ref and then BUILDS one sketchbook per household before the sweep
+// looks, so a store crossing hands the survey `branches >= 1` for anything the
+// docket carried. Measured on the box at S63 `256db2fe`, `surveySketchbooks`
+// returned `{ branches: 1, delta_rows: 1 }` on a store crossing — and that "1"
+// is a surface the crossing had just made, not a drawer of waiting work.
+//
+// The counts land on the receipt at `surveyed:`, one field away from `source:`,
+// which is the only place in the chain that knows which era ran. These pin that
+// the receipt says which of the two readings applies.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The measured S63 store shape: one household written down, one delta. */
+const S63_SURVEYED = { branches: 1, delta_rows: 1, escrow_backed_deltas: 0 };
+
+test("a STORE crossing's surveyed counts are named as the write-down's own output, not a register of waiting work", () => {
+  const r = compose({
+    source: "store",
+    sweep: { published: [], unpublished: [], surveyed: S63_SURVEYED },
+  });
+
+  assert.equal(r.source, "store");
+  assert.deepEqual(r.surveyed, S63_SURVEYED,
+    "the NUMBERS are untouched — this lane moved the reading, not the measurement");
+
+  assert.match(r.surveyed_reading, /write-down/,
+    "the receipt must say these sketchbooks are the crossing's own write-down's output");
+  assert.match(r.surveyed_reading, /not that the town was quiet/,
+    "and must deny the git-era reading outright, because a zero here is the write-down carrying nothing");
+  assert.doesNotMatch(r.surveyed_reading, /standing before this crossing looked/,
+    "the git reading must never appear on a store receipt — that is the whole defect");
+});
+
+test("a GIT crossing's surveyed counts keep the reading they have always had, to the byte", () => {
+  const r = compose({
+    source: "git",
+    sweep: { published: [], unpublished: [], surveyed: { branches: 40, delta_rows: 54, escrow_backed_deltas: 9 } },
+  });
+
+  assert.equal(r.source, "git");
+  assert.equal(
+    r.surveyed_reading,
+    "draft refs that were standing before this crossing looked — a register read independently of the sweep's "
+    + "own candidate path, which is what lets it catch a blind crossing. A zero here beside a zero crossing is the "
+    + "receipt that the town was quiet.",
+    "the git reading is the sentence the loud-empty guard was built on; the cutover does not get to rewrite it",
+  );
+});
+
+test("no SETTLEMENT_SOURCE_MODE reads as git here too — the reading may not disagree with `source`", () => {
+  // The pairing, and it is the half a reader would be hurt by: `source` and
+  // `surveyed_reading` are two answers to the same question, and a receipt that
+  // gave different ones would be worse than a receipt that gave neither.
+  const r = compose({ sweep: { published: [], unpublished: [], surveyed: S63_SURVEYED } });
+  assert.equal(r.source, "git", "the standing law at the top of this file");
+  assert.match(r.surveyed_reading, /standing before this crossing looked/,
+    "and the reading agrees with it rather than defaulting the other way");
+});
+
+test("a crossing with no survey at all carries no reading — a sentence over absent numbers is a claim with no measurement", () => {
+  const r = compose({ source: "store", sweep: { published: [], unpublished: [] } });
+  assert.equal(r.surveyed, null, "there is nothing to read");
+  assert.equal(r.surveyed_reading, null, "so nothing is said about it");
+});
+
+test("a source that is neither git nor store refuses to place the counts rather than guessing", () => {
+  // settlement-auto.sh refuses to run on an unknown $SOURCE, so this can only be
+  // something composing a receipt outside the chain. The failure mode being shut
+  // here is the one `source:` itself was written to shut: an unexpected value
+  // silently reading as the ordinary case.
+  const r = compose({ source: "lab", sweep: { published: [], unpublished: [], surveyed: S63_SURVEYED } });
+  assert.equal(r.source, "lab", "the receipt still reports what it was told");
+  assert.match(r.surveyed_reading, /cannot be said/,
+    "but it must not place counts it has no era for");
+  assert.doesNotMatch(r.surveyed_reading, /the town was quiet/,
+    "and must not hand over the git reading by default");
+});
+
+test("`carried_absent` reaches the receipt with its slugs, and a NOT-CHECKED carry is legible as one", () => {
+  // THE READER CHECK, ON THE FIELD THE 2026-09-12 CARRY ADDED. The composer
+  // passes `selection` through whole, so this field arrives for free — and
+  // "arrives for free" is exactly the condition under which a rename upstream
+  // goes unnoticed for weeks. It is asserted here for the same reason
+  // `docket_claims` is: this receipt is the only durable surface on which anyone
+  // can see that a crossing swept up a window the sweep's timing had orphaned.
+  const carried = compose({
+    source: "store",
+    store: {
+      ...STORE_REPORT,
+      selection: {
+        by: "docket", window: 185, entry: "fold-delta.mjs § foldDelta", docket_claims: 7,
+        carried_absent: {
+          checked: true, count: 2, canon_sha: "b".repeat(40),
+          slugs: ["neth/warm-stone-for-whoever-waits", "sophia-familiaris/reachability-is-not-permission"],
+          skipped_no_household: ["nobody/no-household-at-all"],
+        },
+        note: null,
+      },
+    },
+  });
+  assert.equal(carried.store.selection.carried_absent.count, 2);
+  assert.deepEqual(carried.store.selection.carried_absent.slugs,
+    ["neth/warm-stone-for-whoever-waits", "sophia-familiaris/reachability-is-not-permission"],
+    "BY NAME, not counted: a keeper who cannot see which marks were carried cannot check the repair against the "
+    + "notary's own listing, which is the only other place those slugs appear");
+  assert.equal(carried.store.selection.carried_absent.canon_sha, "b".repeat(40),
+    "and the state the absence was judged at, so the claim is answerable months later");
+  assert.equal(carried.store.selection.docket_claims, 7,
+    "while the docket's own size is untouched — `marks: 9` over `docket_claims: 7` is only readable beside the carry");
+  assert.deepEqual(carried.store.selection.carried_absent.skipped_no_household, ["nobody/no-household-at-all"],
+    "and a canon-absent mark the crossing could NOT carry is named on the receipt too — it needs a person, and a "
+    + "silent skip is how a mark stays lost for another three weeks");
+
+  // THE CONTROL, AND IT IS THE HALF THAT MATTERS ON A HAND-CARRY. A crossing run
+  // without `--world-repo` carries nothing and a town whose canon is complete
+  // carries nothing, and only one of those is evidence. `checked: false` is what
+  // stops the notary's `canon_absent` climbing for weeks under a receipt reading
+  // zero on every crossing.
+  const unchecked = compose({
+    source: "store",
+    store: {
+      ...STORE_REPORT,
+      selection: {
+        by: "docket", window: 185, entry: "fold-delta.mjs § foldDelta", docket_claims: 7,
+        carried_absent: { checked: false, count: 0, slugs: [], canon_sha: null },
+        note: null,
+      },
+    },
+  });
+  assert.equal(unchecked.store.selection.carried_absent.checked, false);
+  assert.equal(unchecked.store.selection.carried_absent.canon_sha, null,
+    "a crossing that never read canon must not appear to have read it at some sha");
+});

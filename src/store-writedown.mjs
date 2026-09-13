@@ -67,11 +67,16 @@
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 
+import { sketchbookNameForKey } from "./household-logins.mjs";
 import { markRecord } from "./mark-record.mjs";
 import { pathFor } from "./world-journal.mjs";
 import { draftBranch, mainRef } from "./world-branches.mjs";
 import { sketchbookBase, writeDownHousehold } from "./world-drain.mjs";
 import { WORLD_CLONE } from "./world-store.mjs";
+// THE ONE COPY of "what is a docket count", from the module that produces the
+// field. The CLI's incomplete-selection refusal reads the same predicate, so the
+// producer, the gate and the guard cannot drift into three spellings of it.
+import { isDocketCount } from "../world2/tools/fold-delta.mjs";
 
 const git = (repo, args, opts = {}) => execFileSync("git", ["-C", repo, ...args], {
   encoding: "utf8",
@@ -511,33 +516,152 @@ export function planStoreWriteDown(marks, { publishedPathOf = null, canonBytesAt
  *                                 was has not proved the day was quiet, and an
  *                                 unproved quiet is the 2026-08-26 shape. The
  *                                 register's own entry point always says.
+ *   anything else                 → `fold-input-shape`. A count is a
+ *                                 non-negative integer; `""`, `false` and `[]`
+ *                                 all coerce to 0 and would have read as "the
+ *                                 docket was empty" on the last guard before
+ *                                 publication. See `fold-delta.mjs §
+ *                                 isDocketCount`, which is the one copy of that
+ *                                 rule and is shared with the CLI.
+ *
+ * ── WHAT THIS GUARD NOW RESTS ON, SAID OUT LOUD (reviewer, 2026-09-09) ───────
+ *
+ * Reading the docket from `claims` buys a second path, and it buys one premise
+ * with it: **that every locked claim names a mark.** There is exactly one code
+ * path where that is false by design — `world2/tools/materialize.mjs:122`:
+ *
+ *     const named = claims.filter((c) => slugOf(c));   // a stake or escrow
+ *                                                      // claim names no mark
+ *
+ * A locked claim that names no mark is never materialized, so a window whose
+ * whole docket was slugless would arrive here as `docketClaims > 0` with an
+ * empty mark read while escrow stands — and would refuse, wrongly, because that
+ * is a LAWFUL crossing.
+ *
+ * IT IS NOT REACHABLE TODAY, and that is measured rather than asserted.
+ * Read-only on prod, 2026-09-09, over every claim the store holds:
+ *
+ *   · 831 slugless locked claims, **every one of them at window 150** — the seed
+ *     import, which wrote its marks directly rather than through `materialize`
+ *     (150 carries 831 locked claims, all slugless, and 820 marks)
+ *   · **zero** slugless locked claims at any window after 150
+ *   · so window 150 is the one window in the store's history whose entire docket
+ *     is slugless — and `foldDelta` folds only the NEWEST closed window, which
+ *     150 has not been for thirty windows
+ *
+ * The live door composes a slug on every path, which is why the count stops at
+ * the import. **If that ever stops being true — a claim class that lawfully
+ * names no mark reaching a live window — this guard gets a false refusal, and
+ * the repair is to count only claims that name a mark.** Written here rather
+ * than left for the next reader to rediscover, because the premise is invisible
+ * from this file and the failure would arrive as a refusal naming a resident.
  */
-export function starvingCheck({ marks = [], stakes = [], docketClaims = null, window = null } = {}) {
+export function starvingCheck({
+  marks = [], stakes = [], docketClaims = null, carriedAbsent = 0, window = null,
+} = {}) {
   const staked = stakes.filter((s) => Number(s.n) > 0);
   const stakedMarks = new Set(staked.map((s) => s.mark));
   const offered = marks.length;
-  // ABSENT IS CHECKED SEPARATELY FROM FINITE, and the separation is the whole
-  // of it: `Number(null)` is 0, which is finite, so the obvious one-liner read a
+  // ABSENT IS CHECKED SEPARATELY FROM VALID, and the separation is the whole of
+  // it: `Number(null)` is 0, which is finite, so the obvious one-liner read a
   // supplier that said NOTHING as a supplier that said "the docket was empty" —
   // and passed quietly on precisely the crossings this guard is the last word
-  // on. Caught by F8h, which is the falsifier for the absent case and reds on
-  // the one-line version. `foldDelta`'s own window check carries the same note
-  // for the same reason; this is that trap in a second place.
-  const docket = docketClaims === null || docketClaims === undefined || !Number.isFinite(Number(docketClaims))
-    ? null
-    : Number(docketClaims);
+  // on. Caught by F8h, which is the falsifier for the absent case.
+  //
+  // ABSENT is the only charitable reading there is. Anything PRESENT and not a
+  // count REFUSES rather than being coerced: the first version of this line
+  // spelled the test `Number.isFinite(Number(docketClaims))`, which reads `""`,
+  // `false` and `[]` as a docket of zero and passes them — a fail-open on the
+  // last guard before publication (reviewer, 2026-09-09).
+  const absent = docketClaims === null || docketClaims === undefined;
+  if (!absent && !isDocketCount(docketClaims)) {
+    throw new FoldInputRefusal(
+      "fold-input-shape",
+      `\`selection.docket_claims\` is ${JSON.stringify(docketClaims)}, which is not a count. The docket's size is a `
+      + "non-negative integer or it is nothing: an empty string, a false and an empty array all become 0 under "
+      + "`Number()`, and a 0 here is read as \"nobody locked a claim\" — a quiet pass on the last guard before the "
+      + "crossing publishes. A supplier that cannot say how big its docket was must say NOTHING, which refuses, "
+      + "rather than something that coerces to a lawful answer.",
+    );
+  }
+  const docket = absent ? null : docketClaims;
 
-  if (offered > 0) {
-    return { starving: false, offered, docket_claims: docket, staked_marks: stakedMarks.size, staked_positions: staked.length };
+  // ── THE FOURTH INPUT: WHICH PART OF THE OFFERED SET IS THE DOCKET'S ────────
+  //                                                              (2026-09-12)
+  //
+  // The fold now offers this window's docket UNION every standing mark canon does
+  // not carry (`world2/tools/fold-delta.mjs § foldDelta`, the second term), so
+  // `offered` can lawfully exceed `docket_claims`. There were two ways to take
+  // that and only one of them keeps this guard:
+  //
+  //   WIDEN `docket_claims` to include the carry — tidy arithmetic, and it SPENDS
+  //   THE GUARD. A materialization that wrote nothing (7 claims locked, 0 marks
+  //   read) alongside two carried rows would arrive here as `offered 2 > 0` and
+  //   pass. The disagreement this function exists to catch would be masked by the
+  //   repair, and the receipt would show a plausible number for it.
+  //
+  //   NAME THE CARRY AS ITS OWN TERM — what this does. The guard's subject is
+  //   still the DOCKET: it tests `offered − carried`, so a carried row cannot
+  //   stand in for a docket mark that never materialized. The two numbers are
+  //   both on the receipt, so `offered 9 = docket 7 + carried 2` is a sentence a
+  //   keeper can check rather than an identity they have to trust.
+  //
+  // Absent reads as zero, which is the honest default and not a charity: every
+  // fold input written before this field existed carried no rows from any other
+  // window, so zero is what it MEANT. The shape test is the shared one, for the
+  // reason `isDocketCount` is shared at all.
+  const carried = carriedAbsent ?? 0;
+  if (!isDocketCount(carried)) {
+    throw new FoldInputRefusal(
+      "fold-input-shape",
+      `\`selection.carried_absent.count\` is ${JSON.stringify(carriedAbsent)}, which is not a count. The carried rows `
+      + "are subtracted from the offered set to find the docket's own, and a value that coerces to 0 would hand this "
+      + "guard a docket larger than the one the fold actually read.",
+    );
+  }
+  // A SUBSET CANNOT BE LARGER THAN ITS SET, and the reason to say so here is that
+  // the next line is a SUBTRACTION. A supplier claiming more carried rows than it
+  // offered would produce a negative `docket_offered`, which is not `> 0`, so it
+  // would fall through to the quiet branches and read as "the docket offered
+  // nothing" — a wrong input arriving as a lawful-looking answer.
+  if (carried > offered) {
+    throw new FoldInputRefusal(
+      "fold-input-shape",
+      `the fold says it carried ${carried} canon-absent mark(s) and offered only ${offered}. The carried rows are a `
+      + "subset of the offered set, so this input describes no crossing that could have happened, and the docket's own "
+      + "count cannot be recovered from it.",
+    );
+  }
+  // WHAT THIS WINDOW'S OWN DOCKET PUT ON THE TABLE. Every test below is about
+  // this number and not about `offered`, which is the whole of the repair.
+  const docketOffered = offered - carried;
+  const counts = {
+    offered,
+    docket_offered: docketOffered,
+    carried_absent: carried,
+    docket_claims: docket,
+    staked_marks: stakedMarks.size,
+    staked_positions: staked.length,
+  };
+
+  if (docketOffered > 0) {
+    return { starving: false, ...counts };
   }
 
   if (stakedMarks.size === 0) {
     // Both paths agree there is nothing: a genuinely quiet crossing. The world's
     // own guard makes the same call for the same reason, and saying so here
     // keeps "quiet" a claim this function actually made rather than a default.
+    //
+    // `quiet` IS FALSE WHEN SOMETHING IS BEING CARRIED, because files are being
+    // published. A guard that passed correctly and then told the keeper the
+    // crossing was quiet would be right about the town and wrong about the day.
     return {
-      starving: false, offered: 0, docket_claims: docket, staked_marks: 0, staked_positions: 0, quiet: true,
-      why: "nothing was offered and nothing is staked: both paths agree the crossing is quiet",
+      starving: false, ...counts, quiet: carried === 0,
+      why: carried === 0
+        ? "nothing was offered and nothing is staked: both paths agree the crossing is quiet"
+        : `this window's docket offered nothing and nothing is staked, and ${carried} mark(s) canon does not carry `
+          + "are being carried from earlier window(s)",
     };
   }
 
@@ -548,19 +672,27 @@ export function starvingCheck({ marks = [], stakes = [], docketClaims = null, wi
     // log line because the keeper reads receipts twelve hours later, and "the
     // guard passed" and "the guard was never asked" must not look alike.
     return {
-      starving: false, offered: 0, docket_claims: 0, staked_marks: stakedMarks.size, staked_positions: staked.length,
-      quiet: true,
-      why: `the docket was empty: nobody locked a claim in window ${window ?? "?"}`,
+      starving: false, ...counts, quiet: carried === 0,
+      why: carried === 0
+        ? `the docket was empty: nobody locked a claim in window ${window ?? "?"}`
+        : `the docket was empty — nobody locked a claim in window ${window ?? "?"} — and ${carried} mark(s) canon does `
+          + "not carry are being carried from earlier window(s)",
     };
   }
 
   const first = [...stakedMarks].sort()[0];
   throw new FoldInputRefusal(
     "store-starving",
-    `the fold carries no marks at all, but the store holds ${staked.length} escrow position(s) across `
-    + `${stakedMarks.size} mark(s) — first, ${first}. Publishing nothing here would be a quiet day that is not one. `
-    + "This is the loud-empty guard's question asked of the register: the marks and the escrow come from different "
-    + "tables written by different pens at different times, so the two answers can disagree, and this is that disagreement.",
+    `the fold carries no marks of this window's own docket, but the store holds ${staked.length} escrow position(s) `
+    + `across ${stakedMarks.size} mark(s) — first, ${first}. Publishing nothing here would be a quiet day that is not `
+    + "one. This is the loud-empty guard's question asked of the register: the marks and the escrow come from "
+    + "different tables written by different pens at different times, so the two answers can disagree, and this is "
+    + "that disagreement."
+    + (carried > 0
+      ? ` The ${carried} canon-absent mark(s) this crossing is carrying from earlier window(s) are NOT an answer to `
+        + "this one: they are the repair for a window that was cleared outside the sweep's timing, and counting them "
+        + "here would let a docket that never materialized pass behind them."
+      : ""),
   );
 }
 
@@ -607,38 +739,34 @@ export function starvingCheck({ marks = [], stakes = [], docketClaims = null, wi
  * An unprefixed key is taken as-is, which is what a key with no era-marker can
  * mean. A key this cannot turn into a legal branch component REFUSES, because at
  * that point there is no honest name left to choose.
+ *
+ * THE RESOLVER MOVED, AND THE REFUSALS DID NOT (2026-09-09). The mapping itself
+ * is now `household-logins.sketchbookNameForKey` — the same function the
+ * registry's own export uses to decide which name to bind a household under, so
+ * the name the map binds and the name the branch carries cannot be two different
+ * strings. What stays here is the only part that is this module's: turning its
+ * reported reason into a refusal that stops a crossing, in this module's words.
  */
 export function sketchbookNameFor(householdKey, { logins = {} } = {}) {
   const key = String(householdKey);
-  const colon = key.indexOf(":");
-  const prefix = colon === -1 ? null : key.slice(0, colon);
-  const rest = colon === -1 ? key : key.slice(colon + 1);
+  const { name, reason, bound } = sketchbookNameForKey(key, logins);
 
-  let name = rest;
-  if (prefix === "gh") {
-    const bound = Object.entries(logins).filter(([, v]) => v === key).map(([login]) => login);
-    if (bound.length === 1) name = bound[0];
-    else if (bound.length > 1) {
-      throw new FoldInputRefusal(
-        "household-key-ambiguous",
-        `${key} is bound by ${bound.length} logins in WORLD/households.json (${bound.join(", ")}) — `
-        + "picking one would name a sketchbook whose authorship wall binds a household this mark may not belong to",
-      );
-    } else {
-      // No login binds this key. The git era has no sketchbook for it either, so
-      // the numeric id is the only stable name left; it binds to nothing in the
-      // wall, exactly like the 13 unbindable sketchbooks already on origin.
-      name = `gh-${rest}`;
-    }
+  if (reason === "ambiguous") {
+    throw new FoldInputRefusal(
+      "household-key-ambiguous",
+      `${key} is bound by ${bound.length} logins in WORLD/households.json (${bound.join(", ")}) — `
+      + "picking one would name a sketchbook whose authorship wall binds a household this mark may not belong to",
+    );
   }
 
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name)) {
+  if (reason === "unnameable") {
     throw new FoldInputRefusal(
       "household-key-unnameable",
       `household ${key} yields "${name}", which is not a legal sketchbook component — `
       + "there is no honest branch name for it, and inventing one would leave the sweep's authorship wall bound to nothing",
     );
   }
+
   return name;
 }
 
@@ -718,9 +846,15 @@ export function storeWriteDown({
   // to build a selection to ask it a question. `?? null` is the whole of the
   // back-compatibility: a supplier with no `selection` refuses exactly as it did
   // before this field existed.
+  //
+  // `carriedAbsent` is unwrapped the same way and defaults to 0 rather than to
+  // null, and the difference is deliberate: an absent DOCKET size is unproved
+  // quiet and refuses, while an absent CARRY is a supplier that carried nothing,
+  // which is what every fold input written before 2026-09-12 did.
   const starving = starvingCheck({
     ...normalized,
     docketClaims: normalized.selection?.docket_claims ?? null,
+    carriedAbsent: normalized.selection?.carried_absent?.count ?? 0,
     window: normalized.as_of.window,
   });
 

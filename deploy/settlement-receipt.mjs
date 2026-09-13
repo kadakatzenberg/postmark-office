@@ -37,6 +37,10 @@
 
 import { readFileSync } from "node:fs";
 
+// The one writer of what a crossing's `surveyed` counts are counts of. The
+// quiet-pass echo in settlement-auto.sh takes its wording from the same file.
+import { surveyedReading } from "./surveyed-reading.mjs";
+
 const env = (name) => {
   const v = process.env[name];
   return v === undefined || v === "" ? null : v;
@@ -52,6 +56,12 @@ const readJson = (path) => {
 // The sweep's outcome channels, in the order a reader wants them: what happened
 // to the record first, what was held back second, what was set aside last.
 const CHANNELS = ["published", "unpublished", "left_drafted", "withdrawn", "quarantined", "suite_quarantined", "dropped", "rebased"];
+
+// WHICH RECORD THIS CROSSING FOLDED, read once. Two fields answer this question
+// — `source` and `surveyed_reading` — and a receipt that answered it two
+// different ways would be worse than one that answered it not at all, so they
+// read the same constant rather than the env twice.
+const SOURCE = env("SETTLEMENT_SOURCE_MODE") ?? "git";
 
 const sweep = readJson(env("SETTLEMENT_SWEEP_JSON"));
 const drain = readJson(env("SETTLEMENT_DRAIN_JSON"));
@@ -71,6 +81,13 @@ const refusal = readJson(env("SETTLEMENT_REFUSAL_JSON"));
 // store. Like the drain's and the retirement's, it arrives on its own report
 // rather than as a sweep channel — the sweep holds no store credential.
 const store = readJson(env("SETTLEMENT_STORE_JSON"));
+// THE HOUSEHOLD REGISTRY REFRESH (2026-09-09). Named on every crossing, like the
+// drain's and the retirement's, and for the sharpest version of their reason:
+// this step's whole point is that "the registry was re-derived" and "nobody
+// re-derived it for 33 days" printed identically for 33 days. `changed: false`
+// is the receipt that the crossing LOOKED; its absence is the state that made
+// the step necessary.
+const registry = readJson(env("SETTLEMENT_REGISTRY_JSON"));
 
 const channels = {};
 let unnamed = null;
@@ -107,7 +124,7 @@ const receipt = {
   // store report exists: a store crossing that REFUSED before its write-down has
   // no store report, and its receipt must still say it was a store crossing, or
   // the operator reading a refusal cannot tell which path refused.
-  source: env("SETTLEMENT_SOURCE_MODE") ?? "git",
+  source: SOURCE,
 
   // ── WHAT A ROLLBACK CROSSING SWEPT UP BEFORE IT LOOKED (repair 1) ──────────
   //
@@ -248,9 +265,79 @@ const receipt = {
       }
     : { ran: false, reason: "the store write-down did not run for this crossing" },
 
+  // ── THE HOUSEHOLD REGISTRY THIS CROSSING FOLDED ON ─────────────────────────
+  //
+  // `town_sha` is the tree the mapping was DERIVED from and `changed` says
+  // whether this crossing moved it. Both are needed and neither substitutes for
+  // the other: an unchanged registry keeps an older `town_sha`, so `town_sha`
+  // alone reads as staleness where there is none, and `changed: false` alone
+  // says nothing about which town the standing file came from.
+  //
+  // `added`, `removed` and `rekeyed` are carried BY NAME, not counted. A handle
+  // that joined a household and a handle that was re-keyed to a different
+  // credential have the same count and completely different consequences: the
+  // first can only group marks that were ungrouped, the second moves marks
+  // between households and can push one over the parcel-claim cap. The keeper is
+  // the reader who can tell those apart, and a count would hide the difference.
+  registry: registry
+    ? (registry.refused
+        ? { ran: true, verified: false, refused: registry.refused, detail: registry.detail ?? null }
+        : registry.ran === false
+          ? {
+              ran: false,
+              // LOUD, and on every unverified crossing. `verified: false` beside
+              // `bypass: true` is the pair a reader needs: the first says the
+              // registry was not checked against the town, the second says a
+              // person meant that. An unverified crossing that reads like an
+              // ordinary one is the 2026-08-07 shape in this lane's own clothes.
+              verified: false,
+              bypass: registry.bypass === true,
+              reason: registry.reason ?? "the registry refresh did not run for this crossing",
+            }
+          : {
+              ran: true,
+              verified: true,
+              // THE SHA IT WAS CHECKED AGAINST, which is not the stamp the file
+              // carries. A registry re-derived and found unchanged keeps an
+              // older stamp and is fresh; `verified_at` is the field that says
+              // so, and `town_sha` below is the file's own. Two facts, two
+              // fields, because conflating them refuses every quiet crossing.
+              verified_at: registry.verified_at ?? null,
+              changed: registry.changed === true,
+              commit: env("SETTLEMENT_REGISTRY_COMMIT") ?? null,
+              town_sha: registry.town_sha ?? null,
+              generated_at: registry.generated_at ?? null,
+              previous_generated_at: registry.previous_generated_at ?? null,
+              previous_town_sha: registry.previous_town_sha ?? null,
+              handles: registry.handles ?? null,
+              households: registry.households ?? null,
+              logins: registry.logins ?? null,
+              added: registry.added ?? [],
+              removed: registry.removed ?? [],
+              rekeyed: registry.rekeyed ?? [],
+            })
+    : { ran: false, verified: false, bypass: false, reason: "the registry refresh did not run for this crossing" },
+
   // WHAT THE CROSSING SURVEYED. A quiet pass without this is a claim with no
   // receipt: "nothing eligible" and "I looked at nothing" print identically.
   surveyed: sweep?.surveyed ?? null,
+
+  // ── AND WHAT THOSE THREE COUNTS ARE COUNTS OF (G1 lane 3, 2026-09-09) ──────
+  //
+  // The numbers above mean two different things in the two eras, and they print
+  // identically. On a git crossing they are draft refs that were STANDING before
+  // the crossing looked — an independent second opinion, which is the whole
+  // reason the loud-empty guard can catch a blind crossing. On a store crossing
+  // `src/store-writedown.mjs` deletes every draft ref and then BUILDS one
+  // sketchbook per household, so the same three numbers are the write-down's own
+  // output read back, and a zero means it carried nothing rather than that the
+  // town was quiet.
+  //
+  // The world's tools cannot make this distinction and must not try: a ref count
+  // is not an era, and the store path deliberately keeps it non-zero. `source:`
+  // above is the only place in the chain that knows, which is why the sentence
+  // is here, one field away from it.
+  surveyed_reading: surveyedReading(SOURCE, sweep?.surveyed ?? null),
 
   // ── WHAT THE STORE WAS TOLD (G1 lane 1) ────────────────────────────────────
   //

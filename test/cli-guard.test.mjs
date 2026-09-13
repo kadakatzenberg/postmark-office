@@ -10,8 +10,10 @@
 // tool exits 0 having done nothing (HQ memory `junctions-defeat-main-guards`,
 // 2026-09-05: 33 fixture reds). The office's sound idioms are the basename
 // compare (src/world-drain.mjs) and the realpath compare
-// (world2/tools/dispatcher.mjs); this lane converted every fragile guard to the
-// latter.
+// (world2/tools/await-clearing.mjs); this lane converted every fragile guard to
+// the latter. (The realpath exemplar was world2/tools/dispatcher.mjs until the
+// subscription was parked on 2026-09-10 — the idiom outlived the file that
+// taught it, and every citation in this repo was repointed with it.)
 //
 // FACE ONE — the import is inert. For every tool, a small importer
 // (test/helpers/cli-guard-importer.mjs) is spawned as the ENTRY and imports the
@@ -110,7 +112,17 @@ const ROSTER = {
   "src/world-drain.mjs": { args: ["--at", "not-a-date"], code: 2, needle: "unparseable --at" },
   "src/world-lints.mjs": { args: ["--db", NOWHERE_DB], code: 1, needle: "" },
   "src/world-serve.mjs": { args: [], env: { WORLD_STORE_DB: NOWHERE_DB, WORLD_CLONE: NOWHERE }, code: 0, needle: "{" },
-  "src/world-store.mjs": { args: [], env: { WORLD_STORE_DB: NOWHERE_DB }, code: 1, needle: "" },
+  // KNOWN RED ON ANY HYDRATED TREE, and the env key that used to sit here was a
+  // lie about why. `world-store.mjs`'s tail calls `loadWorldGraph()` with no
+  // argument, so it reads `DEFAULT_DB` (`OFFICE_ROOT/world.db`) and never looks
+  // at WORLD_STORE_DB — the key its three siblings do read. The proof therefore
+  // exits 1 only where no `world.db` has ever been hydrated; on the box and on
+  // G:/Postmark/office (world.db, hydration_status OK, 1406 nodes) it exits 0
+  // and this goes red. It cannot be fixed from the roster: making it honest
+  // needs either a second expected code here or the tail reading a path, and
+  // both are additions this train is not for. Left named rather than papered
+  // over, and the env key removed because it claimed a control that is not real.
+  "src/world-store.mjs": { args: [], code: 1, needle: "" },
   // tools/
   "tools/backfill-home-shelf.mjs": { args: ["--manifest", NOWHERE], code: 2, needle: "no manifest at" },
   "tools/box-rollcall.mjs": { args: ["--manifest", NOWHERE], code: 2, needle: "the roll-call itself could not run" },
@@ -139,7 +151,6 @@ const ROSTER = {
   // world2/tools/
   "world2/tools/await-clearing.mjs": { args: [], env: NO_PG, code: 2, needle: "--since <iso8601> is required" },
   "world2/tools/backfill-register.mjs": { args: [], env: NO_PG, code: 2, needle: "--class must be one of" },
-  "world2/tools/dispatcher.mjs": { args: ["--once"], env: NO_PG, code: 2, needle: "Nothing to listen to" },
   "world2/tools/escrow-ingest.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: escrow-ingest.mjs --town-repo <checkout>" },
   "world2/tools/falsifier-conversations-equality.mjs": { args: [], env: NO_PG, code: 2, needle: "--voices-log <path> is required" },
   "world2/tools/fold-input-cli.mjs": { args: [], env: NO_PG, code: 2, needle: "--world-sha <sha> is required" },
@@ -148,6 +159,7 @@ const ROSTER = {
   "world2/tools/falsifier-review-closure.mjs": { args: [], env: NO_PG, code: 2, needle: "WORLD2_PG_URL missing" },
   "world2/tools/law-ingest.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: law-ingest.mjs" },
   "world2/tools/ledger-backfill.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: WORLD2_PG_URL=" },
+  "world2/tools/pointer-ingest.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: pointer-ingest.mjs --world-repo" },
   "world2/tools/replay-ingest.mjs": { args: ["--help"], env: NO_PG, code: 0, needle: "usage: replay-ingest.mjs" },
   "world2/tools/retire-unpublished.mjs": { args: [], env: NO_PG, code: 2, needle: "usage: retire-unpublished.mjs" },
   "world2/tools/review-rule.mjs": { args: [], env: NO_PG, code: 2, needle: "review-rule.mjs: which claim?" },

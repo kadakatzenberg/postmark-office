@@ -31,8 +31,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 
+import { loginKeys, sketchbookKeys } from "../src/household-logins.mjs";
 import { markRecord } from "../src/mark-record.mjs";
 import { writeDownHousehold } from "../src/world-drain.mjs";
+import { isDocketCount } from "../world2/tools/fold-delta.mjs";
 import {
   FoldInputRefusal, clearGitSketchbooks, normalizeFoldInput, normalizeMark,
   planStoreWriteDown, sketchbookNameFor, starvingCheck, storeWriteDown,
@@ -392,6 +394,108 @@ test("F6e · the write-down reports how many sketchbooks the wall can bind", () 
     "and both vocabularies are on the row, so either side can be checked against the other");
 });
 
+// ── F10 · THE SECOND KEY MAKES THE WALL BIND A HOUSEHOLD OF ANY SHAPE ────────
+//
+// F6b and F6e above are this cluster's CONTROL, and they are deliberately left
+// exactly as they were: with the registry as it was generated before 2026-09-09,
+// a `solo:` household binds to nothing and the write-down reports it unbound.
+// That is still the truth about that registry, and a crossing reading an old
+// `WORLD/households.json` must still behave that way.
+//
+// What changed is the registry the export PRODUCES. `sketchbookKeys` binds every
+// household key no login binds, under the sketchbook name that key will actually
+// carry. So the pair below is the same fixture as F6e with the map regenerated,
+// and the difference between them IS the flip: remove the second key and F10a
+// becomes F6e.
+//
+// THE WALL IS A CONJUNCTION AND BOTH HALVES ARE ASSERTED. The sweep walls a mark
+// only when `households[record.by]` AND `logins[branchName]` both resolve
+// (`settlement-sweep.mjs:1123-1128`). `wall.unbound` on the receipt measures the
+// branch half alone, so F10a checks the author half against the same registry
+// rather than letting an empty `unbound` stand in for both.
+
+const REGISTRY_REGENERATED = (() => {
+  const households = { "aion-solare": "gh:293432145", "ev-attractor": "solo:ev-attractor" };
+  const { logins } = loginKeys({ "aion-solare": { login: "aionsolare", id: 293432145 } }, households);
+  const { additions, collisions, unnameable } = sketchbookKeys(households, logins);
+  assert.deepEqual(collisions, [], "the fixture must not be exercising the collision path");
+  assert.deepEqual(unnameable, [], "the fixture must not be exercising the unnameable path");
+  return { households, logins: { ...additions, ...logins } };
+})();
+
+test("F10a · a solo household publishes under a wall that can bind it, both halves", () => {
+  assert.equal(REGISTRY_REGENERATED.logins["ev-attractor"], "solo:ev-attractor",
+    "the branch half: draft/ev-attractor now resolves to the household it belongs to");
+  assert.equal(REGISTRY_REGENERATED.households["ev-attractor"], "solo:ev-attractor",
+    "the author half: a mark by: ev-attractor resolves to the same key, so the wall's conjunction is live");
+  assert.equal(REGISTRY_REGENERATED.logins.aionsolare, "gh:293432145",
+    "and the pinned household's own binding is untouched — the second keys merge UNDER the logins, never over them");
+
+  const w = makeWorld("wall-second-key");
+  w.git("update-index", "--add", "--cacheinfo",
+    `100644,${execFileSync("git", ["-C", w.repo, "hash-object", "-w", "--stdin"],
+      { input: JSON.stringify(REGISTRY_REGENERATED), encoding: "utf8" }).trim()},WORLD/households.json`);
+  const tree = w.git("write-tree").trim();
+  const commit = execFileSync("git", ["-C", w.repo, "commit-tree", tree, "-p", w.git("rev-parse", "main").trim(), "-m", "registry"],
+    { encoding: "utf8", env: { ...process.env, ...SEED_ENV } }).trim();
+  w.git("update-ref", "refs/heads/main", commit);
+
+  const report = storeWriteDown({
+    repo: w.repo,
+    at: Date.parse(AT_ISO),
+    input: foldInput([
+      storeMark({ slug: "alpha/one", household: "gh:293432145", path: "WORLD/marks/alpha/one/mark.md" }),
+      storeMark({ slug: "beta/two", household: "solo:ev-attractor", path: "WORLD/marks/beta/two/mark.md" }),
+    ]),
+  });
+
+  assert.equal(report.wall.sketchbooks, 2);
+  assert.equal(report.wall.bound, 2, "BOTH households bind now — F6e is this same run against the old registry");
+  assert.deepEqual(report.wall.unbound, [], "and the receipt's safety net is EMPTY, which is the whole point of the lane");
+
+  assert.deepEqual(report.households.map((h) => h.branch).sort(), ["draft/aionsolare", "draft/ev-attractor"],
+    "the branch names did not move — the map learned to read them, they were not renamed to suit the map");
+});
+
+test("F10b · every key the second-key projection binds has a bindable AUTHOR by construction", () => {
+  // The conjunction's other half, as a property rather than a fixture. The
+  // projection iterates the VALUES of `households`, so a branch it binds is
+  // always a branch whose household some handle in the same map carries. Were it
+  // ever fed keys from somewhere else, it could bind a sketchbook whose author
+  // side is null — the wall would still stand down and the receipt would say
+  // bound, which is worse than saying unbound.
+  const households = { "aion-solare": "gh:293432145", "ev-attractor": "solo:ev-attractor", argos: "hh:argos-and-prometheus" };
+  const { logins } = loginKeys({ "aion-solare": { login: "aionsolare", id: 293432145 } }, households);
+  const { additions } = sketchbookKeys(households, logins);
+  const carried = new Set(Object.values(households));
+  for (const [name, key] of Object.entries(additions))
+    assert.ok(carried.has(key), `${name} binds ${key}, which no handle in this registry carries`);
+  assert.deepEqual(Object.keys(additions).sort(), ["argos-and-prometheus", "ev-attractor"]);
+});
+
+test("F10c · the second key never makes a pinned household ambiguous — the trap a blanket handle-key walks into", () => {
+  // The tempting version of this change is "bind every HANDLE to its household".
+  // It is the worst move available: `sketchbookNameFor` names a `gh:` key by the
+  // ONE login bound to it and REFUSES when several are (F6d), so binding five
+  // handles to gh:67605380 would make the write-down refuse the whole crossing
+  // for the largest household in the town. The rule below only ever binds keys
+  // NO login binds, so a pinned household gains nothing and keeps its one name.
+  //
+  // AND IT IS GUARDED TWICE, WHICH THE CAN-FAIL FLIP FOUND. Removing the
+  // "no login binds it" filter alone leaves this GREEN, because the collision
+  // check catches the same key on the way out. Only removing BOTH reddens it
+  // (measured: additions gains `wrightstarforge -> gh:67605380`). So this test
+  // names an OUTCOME two independent rules produce, not either rule — which is
+  // the honest reading of it, and worth knowing before someone deletes one of
+  // them because "the test still passes".
+  const households = { wright: "gh:67605380", rei: "gh:67605380", postmaster: "gh:67605380" };
+  const { logins } = loginKeys({ wright: { login: "wrightstarforge", id: 67605380 } }, households);
+  const { additions } = sketchbookKeys(households, logins);
+  assert.deepEqual(additions, {}, "a household a login already binds gets no second key at all");
+  assert.equal(sketchbookNameFor("gh:67605380", { logins: { ...additions, ...logins } }), "wrightstarforge",
+    "and the name it carries is still the one login the town pinned");
+});
+
 // ── F7 · A CROSSING NEVER RE-MATERIALIZES A MARK IT IS NOT CHANGING ──────────
 //
 // Lane 2's `mark-render.mjs` states the honest narrow claim — "A MARK A CROSSING
@@ -647,6 +751,96 @@ test("F8j · storeWriteDown still refuses a docket with rows and no marks, befor
   );
 });
 
+// ── F8k–F8n · A COUNT IS A NON-NEGATIVE INTEGER, OR IT IS NOT A COUNT ────────
+//
+// The reviewer's note of 2026-09-09. `Number("")`, `Number(false)` and
+// `Number([])` are all 0, so the first version of the absent-check read each of
+// them as "the docket was empty" and PASSED — a fail-open on the last guard
+// before a crossing publishes. Reachable only from hand-written input, which is
+// exactly the supplier the guard exists to be suspicious of.
+//
+// One test per coercion, because a loop over a table would report the three as
+// one failure and a reader would not know which coercion came back.
+
+for (const [label, value] of [["an empty string", ""], ["false", false], ["an empty array", []]]) {
+  test(`F8k · ${label} is NOT a docket of zero — it refuses as a shape, not as starving`, () => {
+    const e = caught(() => starvingCheck({
+      marks: [],
+      stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+      docketClaims: value,
+      window: 180,
+    }));
+    assert.ok(e instanceof FoldInputRefusal, `${label} must not pass as an empty docket`);
+    assert.equal(e.reason, "fold-input-shape",
+      "and it refuses under its OWN name: an operator reading `store-starving` here would go looking at the store, "
+      + "when the defect is in what the supplier sent");
+    assert.match(e.detail, /not a count/);
+  });
+}
+
+test("F8l · a negative count and a fractional one refuse too", () => {
+  // The other side of the same rule. `-1` and `1.5` are finite numbers and would
+  // both survive a `Number.isFinite` test; neither is a number of claims.
+  for (const bad of [-1, 1.5, Number.NaN, Infinity]) {
+    const e = caught(() => starvingCheck({
+      marks: [], stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+      docketClaims: bad, window: 180,
+    }));
+    assert.ok(e instanceof FoldInputRefusal, `${String(bad)} must refuse`);
+    assert.equal(e.reason, "fold-input-shape", `${String(bad)} must refuse as a shape`);
+  }
+});
+
+test("F8m · a STRING count refuses rather than being read charitably", () => {
+  // `"0"` is the dangerous one: it coerces to a docket of zero and would pass a
+  // crossing quietly. A supplier speaking JSON gives a number; one giving a
+  // string does not know the contract, and guessing for it is how a guard ends
+  // up trusting a value nobody checked.
+  const e = caught(() => starvingCheck({
+    marks: [], stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+    docketClaims: "0", window: 180,
+  }));
+  assert.ok(e instanceof FoldInputRefusal);
+  assert.equal(e.reason, "fold-input-shape");
+});
+
+test("F8n · absent is STILL the one charitable reading, and 0 still passes", () => {
+  // The control that stops F8k–F8m from being a guard that refuses everything.
+  // Absent refuses as starving (F8h's rule, unchanged); a real zero passes.
+  const absent = caught(() => starvingCheck({
+    marks: [], stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+  }));
+  assert.equal(absent.reason, "store-starving", "absent is unproved quiet, not a shape error");
+
+  const zero = starvingCheck({
+    marks: [], stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+    docketClaims: 0, window: 180,
+  });
+  assert.equal(zero.quiet, true);
+  assert.equal(zero.docket_claims, 0);
+});
+
+test("F8o · the guard and the fold CLI share ONE rule, not two spellings of it", () => {
+  // The reviewer found the coercion trap in `fold-input-cli`'s check one file
+  // away from this lane's own fix for it. That is the two-copies class, so the
+  // predicate has one home — `fold-delta.mjs § isDocketCount` — and this asserts
+  // the guard actually agrees with it rather than carrying a private twin.
+  for (const bad of ["", false, [], null, undefined, -1, 1.5, "0", {}]) {
+    assert.equal(isDocketCount(bad), false, `${JSON.stringify(bad ?? null)} must not be a count`);
+  }
+  for (const good of [0, 1, 33, 831]) assert.equal(isDocketCount(good), true, `${good} is a count`);
+
+  // And the guard's own behaviour tracks it: everything the predicate rejects
+  // and that is not absent refuses here.
+  for (const bad of ["", false, [], -1, 1.5, "0"]) {
+    const e = caught(() => starvingCheck({
+      marks: [], stakes: [{ mark: "alpha/staked", holder: "beta", n: 1, weight: 1, tick: 0 }],
+      docketClaims: bad, window: 180,
+    }));
+    assert.equal(e?.reason, "fold-input-shape", `${JSON.stringify(bad)} must refuse in the guard too`);
+  }
+});
+
 // ── F9 · A MARK THE WALL CANNOT BIND IS HELD OUT, NOT WRITTEN ────────────────
 //
 // The ruling, revised on measurement. The first version filtered on `by:
@@ -767,4 +961,141 @@ test("F5 · planStoreWriteDown buckets by household and sorts, with no git and n
   assert.equal(plan.counts.households, 2);
   assert.equal(plan.counts.written, 3, "with no canon to compare against, every mark is a change");
   assert.equal(plan.counts.unchanged, 0);
+});
+
+// ── F8q–F8v · THE CARRIED ROWS ARE A NAMED TERM, NOT A WIDER DOCKET ──────────
+//
+// From 2026-09-12: the fold now offers the window's docket UNION every standing
+// mark canon does not carry (`fold-delta.mjs § foldDelta`, the second term). So
+// `offered` can lawfully exceed `docket_claims`, and the guard has to be told
+// which part of the offered set is the docket's.
+//
+// THE DANGER IS THE OPPOSITE OF THE OBVIOUS ONE. Widening `docket_claims` to
+// include the carry would have kept the arithmetic tidy and SPENT THE GUARD: a
+// materialization that wrote nothing (docket 7, docket marks 0) alongside two
+// carried rows would arrive as `offered 2 > 0` and pass, and the disagreement
+// the guard exists to catch would be masked by the repair. F8s is that case.
+
+test("F8q · offered 9 reads as docket 7 plus carried 2, and is not starving", () => {
+  const r = starvingCheck({
+    marks: Array.from({ length: 9 }, (_, i) => ({ slug: `alpha/m${i}` })),
+    stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+    docketClaims: 7,
+    carriedAbsent: 2,
+    window: 185,
+  });
+  assert.equal(r.starving, false);
+  assert.equal(r.offered, 9);
+  assert.equal(r.docket_claims, 7, "the docket's size is still the docket's");
+  assert.equal(r.carried_absent, 2);
+  assert.equal(r.docket_offered, 7,
+    "and the term the guard actually tests is the docket's own, stated on the receipt rather than inferred");
+});
+
+test("F8r · a crossing whose docket is empty and whose carry is not is NOT called quiet", () => {
+  // The 09-12 repair crossing itself: nobody claimed at this window, and two
+  // marks are being swept up from an earlier one. Two files are published. A
+  // receipt calling that "quiet" would be a true guard telling a false story.
+  const r = starvingCheck({
+    marks: [{ slug: "neth/warm-stone-for-whoever-waits" }, { slug: "sophia-familiaris/reachability-is-not-permission" }],
+    stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+    docketClaims: 0,
+    carriedAbsent: 2,
+    window: 186,
+  });
+  assert.equal(r.starving, false);
+  assert.equal(r.quiet, false, "two marks are being written; that is not a quiet crossing");
+  assert.equal(r.docket_offered, 0);
+  assert.equal(r.carried_absent, 2);
+  assert.match(r.why, /carried/, "and the sentence says which of the two terms filled the fold");
+});
+
+test("F8s · THE TEETH · a carried row must not mask a docket that was never materialized", () => {
+  // The regression the named term exists to prevent. The candle locked 7 claims,
+  // the mark read for this window returned NONE, escrow stands — `store-starving`,
+  // exactly as before — and the two carried rows must not buy a pass by making
+  // `offered` positive.
+  const e = caught(() => starvingCheck({
+    marks: [{ slug: "neth/warm-stone-for-whoever-waits" }, { slug: "sophia-familiaris/reachability-is-not-permission" }],
+    stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+    docketClaims: 7,
+    carriedAbsent: 2,
+    window: 185,
+  }));
+  assert.ok(e instanceof FoldInputRefusal, "a docket with rows and no marks of its own must still refuse");
+  assert.equal(e.reason, "store-starving");
+  assert.match(e.detail, /canon-absent mark\(s\) this crossing is carrying .* are NOT an answer to this one/,
+    "and the refusal says the carried rows were not counted as an answer, or the operator argues with the arithmetic");
+  assert.match(e.detail, /no marks of this window's own docket/,
+    "and it names the subject as the DOCKET, not as the fold, now that the fold can lawfully hold rows from elsewhere");
+});
+
+test("F8t · a carry larger than the offered set is incoherent and refuses rather than going negative", () => {
+  // `docket_offered` is a subtraction, and a subtraction is a place a wrong
+  // supplier turns into a negative number that reads as "no docket rows" and
+  // passes. A subset cannot be larger than its set.
+  const e = caught(() => starvingCheck({
+    marks: [{ slug: "alpha/one" }],
+    stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+    docketClaims: 1,
+    carriedAbsent: 4,
+    window: 185,
+  }));
+  assert.ok(e instanceof FoldInputRefusal);
+  assert.equal(e.reason, "fold-input-shape");
+  assert.match(e.detail, /carried/);
+});
+
+test("F8u · a supplier that says nothing about carrying is read as zero, exactly as before the field", () => {
+  // Back-compatibility as a claim. Every fold input written before 2026-09-12
+  // reaches this guard with no `carried_absent`, and must be judged by the
+  // arithmetic it was written under.
+  const r = starvingCheck({
+    marks: [{ slug: "alpha/one" }],
+    stakes: [{ mark: "alpha/staked", holder: "beta", n: 3, weight: 3, tick: 0 }],
+    docketClaims: 1,
+    window: 185,
+  });
+  assert.equal(r.starving, false);
+  assert.equal(r.carried_absent, 0);
+  assert.equal(r.docket_offered, 1);
+});
+
+test("F8v · storeWriteDown reads the carry off the selection and histograms both windows", () => {
+  // The whole path. A fold input carrying window 185's docket and two marks
+  // locked at 184 must publish all three, count the carry as its own term on the
+  // receipt, and report `written_by_locked_window` keyed by window — which is the
+  // measurement that says a crossing folded a delta and a repair rather than the
+  // standing set.
+  const w = makeWorld("carried-absent", { gitEraSketchbooks: [] });
+  const out = storeWriteDown({
+    repo: w.repo,
+    at: Date.parse(AT_ISO),
+    input: foldInput(
+      [
+        storeMark({ slug: "alpha/own-window", locked_window: 185 }),
+        storeMark({ slug: "alpha/warm-stone", locked_window: 184 }),
+        storeMark({ slug: "alpha/reachability", locked_window: 184 }),
+      ],
+      {
+        as_of: { window: 185, world_sha: "0".repeat(40), town_sha: "1".repeat(40) },
+        stakes: [{ mark: "alpha/staked", holder: "beta", n: 2, weight: 2, tick: 0 }],
+        selection: {
+          by: "docket", window: 185, entry: "fold-delta.mjs § foldDelta", docket_claims: 1,
+          carried_absent: {
+            checked: true, count: 2, canon_sha: "2".repeat(40),
+            slugs: ["alpha/reachability", "alpha/warm-stone"],
+          },
+          note: null,
+        },
+      },
+    ),
+  });
+  assert.equal(out.starving_check.starving, false);
+  assert.equal(out.starving_check.carried_absent, 2, "the guard was told, not left to infer");
+  assert.equal(out.starving_check.docket_offered, 1);
+  assert.deepEqual(out.written_by_locked_window, { 184: 2, 185: 1 },
+    "the histogram names both windows: this crossing's own, and the one it swept up behind it");
+  assert.equal(out.selection.carried_absent.count, 2, "and the slugs reach the receipt by name");
+  assert.deepEqual(out.selection.carried_absent.slugs, ["alpha/reachability", "alpha/warm-stone"]);
 });

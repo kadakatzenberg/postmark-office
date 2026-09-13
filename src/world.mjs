@@ -1051,7 +1051,23 @@ export async function worldOrient(args = {}, key = null, { roll = [] } = {}) {
   const { verbs } = await mods();
   const at = choice.coords ?? await standCoords(choice.handle, w);
   const crossing = crossingOf(args);
-  const o = verbs.orient({ x: at.x, y: at.y, crossing }, w);
+  // THE SAME DEFECT, ONE DOOR OVER — `orient(state, world, { crossing = 0, dials })`
+  // (world-verbs.mjs:29) reads the crossing from the options exactly as
+  // `openYourEyes` does, and this call put it on the state object exactly as
+  // that one did. Measured before the fix: `you.fog.crossing` came back 0 at
+  // every crossing asked for, up to 999.
+  //
+  // Worse here than next door, because the field is NAMED: `/world/orient`
+  // publishes `you.fog.crossing: 0` — not a number quietly computed from the
+  // wrong clock, but the answer stating the wrong clock outright. `inFog` and
+  // `aboveFog` ride the same fog model, so the light a reader is told they are
+  // standing in was crossing-0's light.
+  //
+  // FIXED WITH ITS TWIN AND NOT AFTER IT. Correcting `openYourEyes` alone would
+  // have left the two doors disagreeing about the fog at one standpoint — a
+  // NEW defect, manufactured by a partial fix, and a worse one than two doors
+  // being wrong together. The falsifier asserts that agreement directly.
+  const o = verbs.orient({ x: at.x, y: at.y }, w, { crossing });
   // the note is embodied property: only the body's standpoint carries it — a
   // spectator glance (coords) is nobody's, so it reads nobody's note.
   const note = choice.handle ? noteForHandle(WORLD_CLONE, key, choice.handle) : null;
@@ -1063,12 +1079,13 @@ export async function worldOrient(args = {}, key = null, { roll = [] } = {}) {
   // answer is the one orient has always given.
   const present = await presentNear(at, {
     place: (p) => placeWords(p),
-    // AVAILABLE (the-town/available, world PR #19; Rei-2). The presence layer
-    // answers WHERE from the walk ledger; this answers WHETHER THEY ARE READING
-    // from the say edge's own presence, which the office has kept since the
-    // say-box and nothing ever read back. Injected, not imported — the derived
-    // is voices.mjs's to compute and dynamic-presence's only to carry.
-    available: (handle, atMs) => voices.availability(handle, { at: atMs }),
+    // ⚑ AVAILABLE IS PARKED (2026-09-10, the founder's word). `the-town/available`
+    // was world#19, reverted off the record; the derived was voices.mjs's to
+    // compute and this door's only to inject. With the injection gone the
+    // presence block is the one orient has always given — which was the
+    // injection's own stated guarantee, so this is a return and not a loss.
+    // Bytes on office `wright/parked-proposals-office`; shelf in the world
+    // repo's LOGOS/PROPOSED.md.
     // You are not your own audience — the same ruling the earshot reply follows
     // for `listeners`. A spectator glance excludes nobody: it is nobody's.
     exclude: choice.handle ? [choice.handle] : [],
@@ -1157,6 +1174,121 @@ export function diagnosticEyes(full) {
   };
 }
 
+// ── `records` — a read carries the records it names (2026-09-10) ────────────
+//
+// THE GAP THIS CLOSES. The radial NAMES ids: `objects` here, `within`/`nearby`
+// on the apex. Every reader of those ids then has to resolve each one against
+// something else — and the one thing every reader had was the whole fold. So a
+// door that answers "what can you see from here" in a few dozen entries was
+// only usable by a caller holding 1,197 marks, which is the fold's cost paid to
+// read a radial that deliberately is not the fold.
+//
+// So the read carries what it names. Not more: the promise is exactly "every id
+// this response names, plus the town's ground", and its falsifiers are that
+// biconditional in both directions — an id with no record is a broken read, and
+// a record for an id the response never named is the fold creeping back in.
+//
+// THE GROUND SET is the one whole that is not derived from the standpoint, and
+// it is here because the painting's FLOOR is not a thing you can see — it is
+// the sheet the seen things stand on. It is small and it is fixed: the thirteen
+// region rings the record's own roster names, plus the water the skeleton's own
+// selection names. It is NOT a second fold: it does not grow with the town's
+// marks, only with the town's REGIONS, which is a founding act.
+//
+// ⚑ THE SELECTION IS RESTATED HERE, and that is a cost, not a tidiness. The
+// viewer owns the same rule in `townRegionMarks`/`townWaterShapes`
+// (spectator/viewer.mjs), and those live in a DOM module the office cannot
+// import. What is reused rather than restated is every part that can be: the
+// roster (`REGION_SLUGS`), the ring reader (`polygonOf`) and the water
+// selection (`waterFeatures`/`seaFeature`) all come from the engine the office
+// already imports. What is restated is the ten-line join and the sentinel cut.
+// If the ground ever needs a third reader, that is the moment the rule earns a
+// shared module — not before.
+const GROUND_SENTINEL_M = 50000;   // the positionless marker's magnitude — never ground
+
+// The ring a mark carries, in metres, or null. Mirrors viewer.mjs § tgRing.
+function groundRing(mark, polygonOf) {
+  const ring = mark ? polygonOf(mark) : null;
+  if (!ring?.length) return null;
+  return ring.some((p) => Math.abs(p.x) > GROUND_SENTINEL_M || Math.abs(p.y) > GROUND_SENTINEL_M) ? null : ring;
+}
+
+// Cached per assembled world — the ground moves when the record does and at no
+// other time, and this runs on every read. `_byIds` is the same bargain for the
+// id index: rebuilding a 1,197-entry Map per read measured 78 ms, which is real
+// money next to the 274 ms the world resolution itself costs. Both are WeakMaps
+// keyed on the assembled world, so a re-fold drops them without a sweep.
+const _grounds = new WeakMap();
+const _byIds = new WeakMap();
+
+async function groundMarkIds(w) {
+  const cached = _grounds.get(w);
+  if (cached) return cached;
+  const marks = w?.marks ?? [];
+  const skeleton = w?._raw?.skeleton ?? null;
+  const ids = [];
+  try {
+    const [{ REGION_SLUGS }, { polygonOf }, { waterFeatures, seaFeature }] = await Promise.all([
+      engineImport("region-outsiders.mjs"), engineImport("geometry.mjs"), engineImport("water.mjs"),
+    ]);
+    const slugOf = (m) => String(m?.id ?? "").split("/")[1];
+    // the regions, in the record's own roster order
+    for (const slug of REGION_SLUGS) {
+      const mark = marks.find((m) => slugOf(m) === slug && groundRing(m, polygonOf));
+      if (mark) ids.push(mark.id);
+    }
+    // the water, by the skeleton's own selection — the same one `waterAt` answers with
+    const feats = [...waterFeatures(skeleton)];
+    const sea = seaFeature(skeleton);
+    if (sea && !feats.some((f) => f.id === sea.id)) feats.push(sea);
+    for (const f of feats) {
+      const mark = marks.find((m) => slugOf(m) === f.id && groundRing(m, polygonOf));
+      if (mark && !ids.includes(mark.id)) ids.push(mark.id);
+    }
+  } catch (e) {
+    // LOUD, never silent: a read that quietly lost its floor paints a town on
+    // nothing, and the page has no way to tell that from a town with no regions.
+    //
+    // ⚑ AND NOT CACHED. The `_grounds.set` below is deliberately inside the
+    // success arm: a cache written on the failure path would let ONE transient
+    // engine-import failure poison the ground for the life of that world
+    // object, and every read after it would answer floorlessly and silently
+    // while the one console line that said why scrolled away. A failed read
+    // pays the retry; that is the cheaper of the two.
+    console.error(`[world] the ground set could not be read (${String(e?.message ?? e).slice(0, 140)}) — `
+      + `\`records\` carries only what the radial names for this read, and the next read will try again`);
+    return [];
+  }
+  _grounds.set(w, ids);
+  return ids;
+}
+
+/**
+ * The mark record for every id in `ids`, plus the town's ground set.
+ *
+ * Keyed by id because the only question any caller asks of it is "what is this
+ * id" — a list would make every reader build this map first, and two of them
+ * would build it differently.
+ *
+ * An id with no mark behind it is SKIPPED rather than carried as null: the
+ * promise is "what this response names", and a null would be the door asserting
+ * that a named thing has no record, which it cannot know. The falsifier that
+ * catches a genuinely broken read is the one that compares the response's own
+ * named ids against these keys, and it lives beside the doors, not here.
+ */
+export async function markRecords(ids = [], w = null) {
+  w ??= await world();   // cached by ref+sha; the apex has no world of its own in hand
+  let byId = _byIds.get(w);
+  if (!byId) _byIds.set(w, byId = new Map((w?.marks ?? []).map((m) => [m.id, m])));
+  const out = {};
+  for (const id of [...ids, ...(await groundMarkIds(w))]) {
+    if (id == null || out[id]) continue;
+    const mark = byId.get(id);
+    if (mark) out[id] = mark;
+  }
+  return out;
+}
+
 export async function worldEyes(args = {}, key = null, { roll = [] } = {}) {
   const choice = chooseStandpoint(args, key);
   if (choice.bounce) return choice.bounce;
@@ -1164,7 +1296,24 @@ export async function worldEyes(args = {}, key = null, { roll = [] } = {}) {
   const { verbs } = await mods();
   const at = choice.coords ?? await standCoords(choice.handle, w);
   const crossing = crossingOf(args);
-  const r = verbs.openYourEyes({ x: at.x, y: at.y, crossing, name: args.name }, w);
+  // ⚑ THE CROSSING GOES IN THE OPTIONS, NOT THE STATE (2026-09-10).
+  //
+  // This read `openYourEyes({ x, y, crossing, name }, w)` and the engine has
+  // never looked there: `openYourEyes(state, world, { crossing = 0, … })`
+  // (world-verbs.mjs:63) takes it from the THIRD argument, which this call did
+  // not pass. So `fogModel(crossing)` ran at 0 on every read this office has
+  // ever served — measured before the fix, at five crossings including 999,
+  // `radial.crossing` came back 0 and `fog.thickness` 0.1 every time.
+  //
+  // It failed silently and it failed CONVINCINGLY: an unknown key on a state
+  // object is not an error, the answer still has a fog block, and the number in
+  // it is a real number for a real crossing — just never the one you asked for.
+  // Nothing in the told SET moved, because at this fold's scale `fogHidden` is
+  // 0 everywhere, which is exactly why it survived: the only witness was a
+  // thickness nobody was comparing against a second source.
+  //
+  // world2-serve.mjs:570 has always had the right form. This is the older twin.
+  const r = verbs.openYourEyes({ x: at.x, y: at.y, name: args.name }, w, { crossing });
   // tell is a lazy thunk on the verb's return — render it here so the JSON
   // skin carries the prose (a function would vanish in serialization).
   const engineTelling = typeof r.tell === "function" ? r.tell() : r.tell ?? null;
@@ -1176,7 +1325,7 @@ export async function worldEyes(args = {}, key = null, { roll = [] } = {}) {
   // office a second author of the world's voice.
   const present = await presentNear(at, {
     place: (p) => placeWords(p),
-    available: (handle, atMs) => voices.availability(handle, { at: atMs }),   // see worldOrient
+    // (`available` was injected here too — parked; see worldOrient's note.)
     exclude: choice.handle ? [choice.handle] : [],
     repo: WORLD_CLONE,
     world: w,
@@ -1188,6 +1337,20 @@ export async function worldEyes(args = {}, key = null, { roll = [] } = {}) {
     standpoint: { ...at, stance: choice.stance }, crossing: { n: crossing, derivation: CROSSING_DERIVATION },
     telling, ...rest, ...(present ? { present } : {}),
   };
+  // ⚑ `records` DOES NOT RIDE THIS BRANCH, and that is a ruling, not an
+  // oversight (Keemin, 2026-09-10 22:4x: "my confusion is on why we need this
+  // info for the page").
+  //
+  // It briefly did. The resident page was going to boot on `?diagnostic=true`,
+  // because that is the only shape carrying the radial whole, and the field was
+  // added here to serve it. The page now boots on the COMPACT read instead —
+  // `objects`, `records`, `telling`, `present`, exactly what a resident reads —
+  // and adapts to that shape rather than asking the door to hand it the
+  // engine's internals. So the reason this field was here left, and the field
+  // went with it.
+  //
+  // The rule that survives: `diagnostic` is a DIAGNOSTIC. Nothing the town's
+  // pages run is allowed to depend on it, or it stops being one.
   if (args.diagnostic === true) return diagnosticEyes(full);
 
   const markById = new Map((w.marks ?? []).map((mark) => [mark.id, mark]));
@@ -1205,6 +1368,9 @@ export async function worldEyes(args = {}, key = null, { roll = [] } = {}) {
   });
   return {
     stance: choice.stance, telling, objects,
+    // THE RECORDS THIS ANSWER NAMES (2026-09-10). `objects` is the only list
+    // here that names ids, so this is exactly those plus the ground.
+    records: await markRecords(objects.map((o) => o.id), w),
     // Grouped by the engine's own distance bands, nearest band first — the same
     // organisation the telling uses, so the compact shape and the prose agree.
     // An empty array means nobody is about; the key's ABSENCE means presence is
@@ -1233,19 +1399,17 @@ export async function worldPresent(args = {}, { roll = null } = {}) {
   // The fold, so this door answers over the whole position union — everyone with
   // a walk on record AND everyone holding ground (issue #7 §1).
   const w = await foldForPresence();
-  // AVAILABLE HERE TOO, from the same resolver the apex and the walkers door
-  // use. This is the THIRD presence surface, and a field that landed on two of
-  // three would leave the standalone door — the one the town's map draws from —
-  // disagreeing with `orient` about who is reading. That is the split-brain
-  // issue #7 and DEC-11 each paid for once; it is not worth buying a third
-  // time for one line. The disclosure is the boolean and its window, which is
-  // the same fact any keyed caller already reads, and nothing more: no text, no
-  // position this door did not already publish.
-  const available = (handle, atMs) => voices.availability(handle, { at: atMs });
-  if (!has) return presenceEveryone({ place, available, repo: WORLD_CLONE, world: w, roll: roll ?? [] });
+  // ⚑ `available` WAS INJECTED HERE TOO, and it came out with the other two.
+  // It was on all THREE presence surfaces on purpose — a field landing on two
+  // of three would have left this standalone door, the one the town's map draws
+  // from, disagreeing with `orient` about who is reading, which is the
+  // split-brain issue #7 and DEC-11 each paid for once. That argument is why it
+  // is parked from all three IN ONE COMMIT rather than door by door: the
+  // symmetry is the point in both directions.
+  if (!has) return presenceEveryone({ place, repo: WORLD_CLONE, world: w, roll: roll ?? [] });
   const radiusM = Number.isFinite(Number(args.radius_m)) ? Math.max(1, Number(args.radius_m)) : undefined;
   const limit = Number.isFinite(Number(args.limit)) ? Math.max(1, Math.floor(Number(args.limit))) : undefined;
-  return presenceNear({ x, y, place, available, repo: WORLD_CLONE, world: w, roll: roll ?? [], ...(radiusM ? { radiusM } : {}), ...(limit ? { limit } : {}) });
+  return presenceNear({ x, y, place, repo: WORLD_CLONE, world: w, roll: roll ?? [], ...(radiusM ? { radiusM } : {}), ...(limit ? { limit } : {}) });
 }
 
 // ── a mark's image, as bytes (world_investigate with_image, 2026-08-23) ──────
@@ -1645,6 +1809,30 @@ export async function worldMyMarks(key = null, { offset = 0 } = {}) {
       kind: mark.kind,
       tier: mark.tier,
       body: mark.body,
+      // ── WHERE THE MARK STANDS (2026-09-10, Keemin: "can we just add coords
+      // to my marks?" — yes) ──────────────────────────────────────────────────
+      //
+      // This door was built as a PORTFOLIO read — what you own, what you have
+      // backed — and a portfolio has no map, so it never carried a position.
+      // That was fine while the page looked every id up in the whole fold. It
+      // is not fine now: the resident view draws "the field of view, plus all
+      // of yours whether it holds them or not" (Keemin, 2026-08-04) without a
+      // fold to look anything up in, and a row with no `at` cannot be drawn at
+      // all. The rule did not change; the thing that used to supply the
+      // position went away.
+      //
+      // Same two fields the draft and docket rows have always carried, out of
+      // the same mark record, so a resident's own marks read one way across
+      // this door's four lists rather than two.
+      //
+      // ABSENT, NOT NULL, when the mark has neither — and that is the honest
+      // shape here, not tidiness: a predicated or naming mark HAS no site of
+      // its own (the engine skips exactly these: `if (!mk.at) continue`), and
+      // `at: null` would say "this thing is somewhere unknown" about a thing
+      // that is nowhere by construction. A consumer asks `if (row.at)`, which
+      // is the question it actually has.
+      ...(mark.at ? { at: mark.at } : {}),
+      ...(mark.extent ? { extent: mark.extent } : {}),
       stamps: Number(mark.stamps ?? 0),
       weight: Number(mark.weight ?? 0),
       // The ✦ figure's receipt, straight from the fold (marks-fold.mjs §
@@ -1993,6 +2181,44 @@ async function groundMinimumStake(clean, canon) {
       return { min: 0, ground: g.id };
   }
   return commons;
+}
+
+/**
+ * WHOSE GROUND IS THIS — the same rule, answered as a TRI-STATE.
+ *
+ * `true` own ground · `false` the commons · `null` the office cannot tell.
+ *
+ * ── WHY A SECOND ENTRY AND NOT JUST `min === 0` ────────────────────────────
+ *
+ * Because `groundMinimumStake`'s safe read points the OTHER WAY for the caller
+ * that needs this one. Its own comment says so: "an unrecognised ground reads
+ * as commons, so the failure mode is 'your mark stayed private', never 'your
+ * mark published for free on someone else's land'." That is exactly right for
+ * the leave-mark door, where the cost of guessing wrong is a draft the author
+ * can re-stake in a second.
+ *
+ * It is exactly wrong for `world-stake.mjs § unbackedRefusalFor`, which uses
+ * this answer to decide whether to take a mark BACK OFF the docket. There,
+ * guessing "commons" on an office that could not load the geometry engine
+ * retracts an own-ground resident's lawful publication and tells them a law
+ * that does not govern their ground. So this reader separates "I looked and it
+ * is the commons" from "I could not look", and the caller refuses only on the
+ * first — the discipline `escrow-presence.mjs` states in one line: "a store
+ * that cannot answer and a town where nobody staked are different facts."
+ *
+ * The RULE is not duplicated. This asks `groundMinimumStake` and reports its
+ * answer; all it adds is the one condition under which that answer was a
+ * fallback rather than a finding.
+ */
+export async function markStandsOnOwnGround(clean, canon = null) {
+  try {
+    const { marksContain } = await foldConstants();
+    if (typeof marksContain !== "function") return null; // could not look
+    const board = canon ?? canonForGuards();
+    if (!clean?.at && !board.byId.get(clean?.parent_id)) return null; // nothing to place it by
+    const { min } = await groundMinimumStake(clean, board);
+    return min === 0;
+  } catch { return null; }
 }
 
 /**
@@ -2486,21 +2712,27 @@ export async function withdrawMarkViaOffice(worldClone, args = {}, key = null) {
   const bounce = (code, defect, hint) => { const e = new Error(defect); Object.assign(e, { code, defect, hint }); return e; };
   const mark = String(args.mark ?? "").trim();
   // A GATHERING IS NOT A MARK, and this door says so BEFORE it parses the id.
-  // A gathering id (`gathering:<host>:<place id>:<start ms>`, minted by
-  // gatherings.mjs § gatheringIdFor) contains a "/" because the PLACE id does,
-  // so it passed the shape check below and was then sliced at its first "/" —
-  // the office answered 403 «"gathering:wright:the-town" is not on your key»,
-  // a handle nobody holds, and never said the word gathering. The conductor's
-  // ruling (2026-09-08): that parse is a bug whatever the law ends up saying.
-  // This refusal is the office REPORTING A FACT — which door writes a
-  // gathering's cancellation on this tree — and not a ruling on law question A
-  // (whether the clause's word "withdraw" should also reach this door), which
-  // is the founder's. If the founder rules that it should, this branch becomes
-  // the routing and the sentence goes away.
+  // A gathering id (`gathering:<host>:<place id>:<start ms>`) contains a "/"
+  // because the PLACE id does, so it passed the shape check below and was then
+  // sliced at its first "/" — the office answered 403 «"gathering:wright:the-town"
+  // is not on your key», a handle nobody holds, and never said the word
+  // gathering. The conductor's ruling (2026-09-08): THAT PARSE IS A BUG WHATEVER
+  // THE LAW ENDS UP SAYING, which is why this guard outlives the law it was
+  // written beside.
+  //
+  // ⚑ THE GATHERING IS PARKED (2026-09-10, the founder's word; world#15 held on
+  // `wright/law-gathering-class`, the office module on
+  // `wright/parked-proposals-office`). So the guard stays and its HINT changed:
+  // it used to send the caller to `world { do: "gather", … }`, and that door is
+  // no longer on the train. A refusal that routes a resident to a door which
+  // does not exist is a worse answer than the 403 this guard was written to
+  // replace, so it now says the true thing — no door writes a gathering here
+  // today. When #15 is ruled and the module returns, the routing sentence
+  // returns with it.
   const gatheringId = String(args.gathering ?? "").trim() || (mark.startsWith("gathering:") ? mark : "");
   if (gatheringId) {
     throw bounce(422, `"${gatheringId}" names a gathering, and this door withdraws marks`,
-      `a gathering is a fleeting node that rides a mark, not a mark of its own, so this door cannot withdraw it. Cancel it through the door that declared it: world { do: "gather", args: { gathering: "${gatheringId}", withdraw: true } } — the cancellation is a row like the declaration was, and every prior invitation stays in the log.`);
+      `a gathering is a fleeting node that rides a mark, not a mark of its own, so this door cannot withdraw it — and no door on this office declares or cancels one today: the gathering is parked law (world#15, awaiting the founder's word), so nothing here has minted this id.`);
   }
   if (!mark || !mark.includes("/")) throw bounce(422, "which mark?", "pass mark: '<by>/<slug>' — ids as the telling shows them");
   const by = mark.slice(0, mark.indexOf("/"));
@@ -2895,7 +3127,7 @@ export async function walkViaOffice(worldClone, payload = {}, key = null) {
 
   const w = await world();
   const skeleton = w?._raw?.skeleton ?? null;
-  const { parseWalkLedger, currentDeparture, positionAt, fractionalCrossing, extentForArrival, isWalkArrival, targetEntryT } =
+  const { parseWalkLedger, currentDeparture, positionAt, fractionalCrossing, extentForArrival, isWalkArrival, targetEntryT, walkTargetFor } =
     await import(pathToFileURL(join(worldClone, "tools", "walk.mjs")));
 
   // WHERE IN THE TARGET — issue #5 §1, RENAMED 2026-08-19 (founder-ruled, the
@@ -2993,6 +3225,37 @@ export async function walkViaOffice(worldClone, payload = {}, key = null) {
     const asked = withinFor(forClone, targetExtent);
     if (asked === null) targetFrom = `${targetFrom} — its center`;
     targetExtent = asked;
+  }
+
+  // ── RING WINS HERE TOO (founder-ruled 2026-09-11) ─────────────────────────
+  //
+  // A RINGED target's ground is its ring, so its arrival point is the ring's
+  // and not its bounding box's. The world's own walk.mjs owns what that MEANS
+  // (`walkTargetFor` — the same discipline as `extentForArrival` right above:
+  // the office asks, it never decides, so the door and the pen cannot drift
+  // into two answers), and it answers null for every mark without a ring, which
+  // is every parcel, every home and all but 23 marks in the town.
+  //
+  // OPTIONAL, exactly as `extentForArrival` and `isWalkArrival` are optional
+  // here: this office deploys on its own clock and may be standing on a clone
+  // that predates the ruling. An older clone has no `walkTargetFor`, this block
+  // does not run, and the door writes the box it has always written.
+  //
+  // The result is a departure with a frozen `toward` and NO `within` — the
+  // shape `src/arena.mjs § arrivalOnGround` already writes and the vessel has
+  // always sailed. The arena block below still runs after this and still wins
+  // for a wheel-keeping ground, which is right: a ground that places its own
+  // entrants has said something more specific than "somewhere on my ground".
+  if (targetMarkId && typeof walkTargetFor === "function") {
+    const m = (w.marks ?? []).find((k) => k.id === targetMarkId);
+    const ringed = m ? walkTargetFor(m, from, forClone) : null;
+    if (ringed) {
+      toward = ringed.toward;
+      targetExtent = null;
+      targetFrom = `${targetFrom.replace(/ — its center$/, "")} — ${
+        forClone === "center" || forClone === "centre" ? "its center" : "its ring's near edge"
+      }, on its own ground`;
+    }
   }
 
   /**
@@ -3522,23 +3785,12 @@ export async function worldWalkers(worldClone, key = null, { roll = null } = {})
     // frame needs the engine; what it takes is a precomputed map, so the purity
     // holds and the two derivations still meet in exactly one place.
     const walkers = everyonePlaced({ world: w, departures, at, where, roll: roll ?? [] });
-    // AVAILABLE on the walkers door too, from the SAME resolver `present` uses.
-    // These are two row-builders for one roster — "world_walkers and present
-    // name the same residents, one derivation, two doors" (dynamic-presence.mjs
-    // § the roll) — and a field that landed on one of them would be the exact
-    // split-brain that consolidation ended. `world { read: "walk" }` reads this
-    // door, so this is where the apex's walk shadow gets the word.
-    // GUARDED, for the reason dynamic-presence's `askAvailable` is guarded: a
-    // derived that cannot answer is absent, never fatal. This door has no
-    // try/catch above it at all, so an unguarded throw here took out the whole
-    // walkers answer — the door the town's map draws from — for one boolean.
-    const withAvailability = (rows) => rows.map((r) => {
-      try { return { ...r, available: voices.availability(r.handle) }; }
-      catch (e) {
-        console.error(`[walkers] availability tripped for ${r.handle} (${String(e?.message ?? e).slice(0, 120)}) — the row answers without it`);
-        return r;
-      }
-    });
+    // ⚑ `available` WAS ON THE WALKERS DOOR TOO — the fourth surface, from the
+    // same resolver `present` used, because these are two row-builders for one
+    // roster ("world_walkers and present name the same residents, one
+    // derivation, two doors"). Parked 2026-09-10 with the other three; the row
+    // returns to what it was before the field existed, and the apex's walk
+    // shadow reads this door, so it loses the word here and nowhere else.
     // THE ROLL'S ABSENCE IS A DISCLOSURE, not a silence. Given no roll this door
     // answers about doers only — which is exactly the shape of the original
     // defect — so it says which question it asked rather than letting a narrower
@@ -3548,7 +3800,7 @@ export async function worldWalkers(worldClone, key = null, { roll = null } = {})
       : "no town roll supplied to this door — the answer covers residents with a walk record or ground, and cannot include a resident who has neither";
     return {
       at,
-      walkers: withAvailability(movementV2Enabled() ? await walkersInFrames(walkers, w, departures) : walkers),
+      walkers: movementV2Enabled() ? await walkersInFrames(walkers, w, departures) : walkers,
       // The disclosure the reader assembled, carried rather than dropped. A door
       // that reads half the record and says nothing is the failure this whole
       // change is about.
