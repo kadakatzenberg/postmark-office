@@ -19,6 +19,10 @@ jobs:
         with:
           ref: ${{ github.ref_name }}
 
+      - name: Install dependencies
+        shell: bash
+        run: npm install --no-audit --no-fund
+
       - name: Write regression falsifier
         shell: bash
         run: |
