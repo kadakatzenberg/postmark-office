@@ -663,7 +663,7 @@ export async function callTool(name, args, ctx) {
       // exactly one read inside the apex — `doorstep`, which forwards it to the
       // bundle — and the REST call site at server.mjs § GET /household passes
       // no such thing, so the third door answers what it always answered.
-      return householdApex(args, key, { db, clone, odb, dbPath, pen, canWrite, meta, asOf, slim: true, schemas: flatPropsMap(), schemaRequired: flatRequiredMap(), strictFields: true });
+      return householdApex(args, key, { db, clone, odb, dbPath, pen, canWrite, meta, asOf, slim: true, advertiseRetryNonce: true, schemas: flatPropsMap(), schemaRequired: flatRequiredMap(), strictFields: true });
     }
     case "town": {
       // `call` is this very dispatcher, handed back to the apex. The town verb

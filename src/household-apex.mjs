@@ -644,7 +644,7 @@ async function doBegin(fields, key, { odb }) {
 
 /** The fields one act takes, through the world apex's own field-generation
  *  path (world-apex.mjs § actionFields) — never a second implementation. */
-function fieldsForAct(act, { schemas, schemaRequired } = {}) {
+function fieldsForAct(act, { schemas, schemaRequired, advertiseRetryNonce = false } = {}) {
   const spec = ACTS[act];
   if (!spec) return {};
   const strip = STANDPOINT_HANDLE_ACTS.has(act) ? new Set(["handle"]) : new Set();
@@ -653,7 +653,17 @@ function fieldsForAct(act, { schemas, schemaRequired } = {}) {
   }
   const own = APEX_ONLY_FIELDS[act];
   if (own) return actionFields(own.properties, own.required, { strip });
-  return actionFields(schemas?.[spec.tool] ?? {}, schemaRequired?.[spec.tool] ?? [], { strip });
+  const fields = actionFields(schemas?.[spec.tool] ?? {}, schemaRequired?.[spec.tool] ?? [], { strip });
+  // The retry key belongs to the renegotiated MCP affordance, not to
+  // REST's frozen card shape and not to every surface that happens to
+  // use the foyer's `slim` transport flag (notably the doorstep).
+  if (advertiseRetryNonce && act === "send") {
+    fields.nonce = {
+      type: "string",
+      description: "optional retry key for this send; the same nonce returns the first letter's receipt instead of writing a second letter",
+    };
+  }
+  return fields;
 }
 
 /**
@@ -768,7 +778,7 @@ export async function householdApex(args = {}, key = null, ctx = {}) {
   // `slim` rides the ctx for ONE read (`doorstep`), and only the MCP skin sets
   // it — see the note above about `meta`, which is why this one is passed by
   // exactly one call site on purpose rather than by omission.
-  const { db, clone, odb, dbPath, pen, schemas, schemaRequired, meta, asOf, canWrite, channel, slim = false } = ctx;
+  const { db, clone, odb, dbPath, pen, schemas, schemaRequired, meta, asOf, canWrite, channel, slim = false, advertiseRetryNonce = false } = ctx;
   const doing = args.do != null && args.do !== "";
   const reading = args.read != null && args.read !== "";
   if (doing && reading) return bounce(422, "one call does one thing — do: performs, read: observes", "they never ride together; call twice");
@@ -783,7 +793,7 @@ export async function householdApex(args = {}, key = null, ctx = {}) {
     if (slim) {
       return {
         ...standing,
-        acts: capabilityIndex({ schemas, schemaRequired }),
+        acts: capabilityIndex({ schemas, schemaRequired, advertiseRetryNonce }),
         reads: HOUSEHOLD_READS,
         ...(identityOf(key) ? { credential: identityOf(key) } : {}),
         abridged: CARD_TEACH,
@@ -1139,7 +1149,7 @@ export async function householdApex(args = {}, key = null, ctx = {}) {
     if (ACTS[what]) {
       const store = openStore();
       try {
-        return { read: what, card: actCard(what, store.db, { schemas, schemaRequired }), reading_law: READING_LAW };
+        return { read: what, card: actCard(what, store.db, { schemas, schemaRequired, advertiseRetryNonce }), reading_law: READING_LAW };
       } finally { store.db?.close(); }
     }
     // The menu comes from the TABLES, so the refusal cannot name a read the door
@@ -1240,7 +1250,7 @@ export async function householdApex(args = {}, key = null, ctx = {}) {
 
   const store = openStore();
   let card;
-  try { card = actCard(act, store.db, { schemas, schemaRequired }); } finally { store.db?.close(); }
+  try { card = actCard(act, store.db, { schemas, schemaRequired, advertiseRetryNonce }); } finally { store.db?.close(); }
   // The channel rides the answer so a caller can log what the town recorded
   // about how the act arrived. Echo only — nothing reads it back.
   const done = { did: act, dispatched_to: spec.tool, ...(card ? { card } : {}),
