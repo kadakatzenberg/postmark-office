@@ -58,9 +58,22 @@ const bounce = (code, defect, hint, extra = {}) => ({ error: "bounce", code, def
  * the falsifiers can put a retired mark in front of it without a database, and
  * the door and the test cannot drift into two rules.
  */
-export function stakeRefusalFor({ mark, n, promoted, status }) {
+export function stakeRefusalFor({ mark, n, promoted, status, refused = null }) {
   if (!(n >= 1)) return null;                 // the zero path has its own ruling, below
   if (promoted) return null;                  // it went forward; nothing to refuse
+  // ── THE PEN ANSWERED NO — DO NOT CHARGE FOR IT (postmark#2722) ────────────
+  //
+  // Ahead of the store reads below, because this is not a question about the
+  // mark's standing at all: the promotion was attempted and REFUSED, so there
+  // is no claim, and stamps taken now are the debt with no receipt this file
+  // already refuses to create at the other end. `refused` is only ever set for
+  // a lawful refusal, never for an unreachable store — that case still falls
+  // through to the ledger, unchanged.
+  if (refused) return bounce(409, `"${mark}" could not be put forward, so nothing was staked`,
+    "your draft is safe and your stamps are untouched — the office could not file it on this crossing's docket, " +
+    "and it will not take stamps for a claim it did not file. Try the stake again; if it refuses twice, tell the " +
+    "postmaster, because a draft this office cannot put forward is the office's defect, not yours.",
+    { held: 0, requested: n });
   if (!status?.known || !status?.found) return null;  // the store cannot say; the ledger still runs
   if (!status.retired) return null;           // it stands; an ordinary stake on a public mark
   return bounce(422, `"${mark}" is not standing — it returned to your drafts`,
@@ -371,7 +384,25 @@ async function runExec(payload) {
   return parsed;
 }
 
-export async function worldStakeViaOffice(args = {}, key = null) {
+// ── `deps` — SO THE ONE LINE THAT STOPS THE CHARGE CAN BE FALSIFIED ─────────
+//
+// The shape `arenaActViaOffice` and `enterViaOffice` already use, and here for
+// a reason worth writing down: the #2722 repair is a `catch` that tells a
+// lawful refusal from an outage, and a unit test of `stakeRefusalFor` cannot
+// reach it. The reviewer proved that by flipping the catch's class name to one
+// that never arrives — the debit came back and the suite stayed green, because
+// nothing drove this door with a pen that refuses. Three collaborators are
+// injectable now, and the falsifier watches whether `ledger` is called AT ALL:
+// "the resident was not charged" is an absence, and an absence needs a witness.
+//
+// Defaults are the real ones, so no caller changes and the office is untouched.
+export async function worldStakeViaOffice(args = {}, key = null, deps = {}) {
+  const {
+    exists = markExists,
+    ledger = runExec,
+    promote = async (p) => (await import("./world2-claims.mjs")).promoteDraftOnStake(p),
+    standing = async (p) => (await import("./world2-claims.mjs")).markStandingStatus(p),
+  } = deps;
   const who = actingAs(args.handle, key);
   if (who.bounce) return who.bounce;
   if (!args.mark) return bounce(422, "which mark?", "pass mark: '<by>/<slug>' — ids as they appear in the telling");
@@ -387,7 +418,7 @@ export async function worldStakeViaOffice(args = {}, key = null) {
   if (!Number.isInteger(n) || n < 0) return bounce(422, "how many stamps?", "pass stamps: a whole number — at least 1 on the commons, or 0 on your own household's ground, where a zero stake still puts the mark forward");
 
   // the door's own gate: the ledger cannot see the world record
-  const ex = await markExists(args.mark, key);
+  const ex = await exists(args.mark, key);
   if (ex.known && !ex.exists)
     return bounce(404, `no mark "${args.mark}" in the world you can see`,
       "ids are <by>/<slug> as the telling shows them — you can back published marks and your own household's drafts; another household's draft becomes stakeable when Settlement publishes it");
@@ -402,19 +433,32 @@ export async function worldStakeViaOffice(args = {}, key = null) {
   // Of the two failure shapes, this is the recoverable one.
   const by = String(args.mark).slice(0, String(args.mark).indexOf("/"));
   let putForward = null;
+  let promotionRefused = null;
   try {
-    const { promoteDraftOnStake } = await import("./world2-claims.mjs");
     // NOTHING IS WRITTEN ONTO THE CLAIM ABOUT WHAT IS HELD, deliberately
     // (ruled 2026-09-12). `stake` here is the number ASKED and it stays that;
     // what is actually behind the mark is DERIVED on the docket read from
     // `escrow_projection`, through the candle's own reader. See
     // world2-claims.mjs § WHY THE ROW DOES NOT SAY WHAT IT HOLDS.
-    putForward = await promoteDraftOnStake({
+    putForward = await promote({
       actor: by, householdName: key?.household, slug: args.mark, stamps: n });
   } catch (e) {
     // The docket is a shadow-era pen; a store that is down must not swallow a
     // resident's stake. Loud, and the ledger still runs.
     console.error(`[world-stake] the docket could not be reached for "${args.mark}": ${String(e?.message ?? e)}`);
+    // ── AN OUTAGE AND A REFUSAL ARE DIFFERENT FACTS (postmark#2722) ────────
+    //
+    // The posture above is right for a store that is DOWN and wrong for a
+    // store that ANSWERED NO. On 2026-09-12 the pen refused Sophia's promotion
+    // by law — a certified window may not be rewritten — this catch logged it,
+    // and the ledger below debited ✦1 for a claim that was never filed. That
+    // is the thing this file calls "a debt with no receipt" eleven lines down,
+    // arriving through the one door that was not watching for it.
+    //
+    // So a refusal is remembered and refuses the stake before the ledger runs;
+    // an unreachable store keeps the old posture exactly. Named by class rather
+    // than by message, because the message is the notary's to reword.
+    if (e?.name === "LateCrossingError") promotionRefused = e;
   }
 
   if (n === 0) {
@@ -440,17 +484,16 @@ export async function worldStakeViaOffice(args = {}, key = null) {
   // have claimed it was.
   let status = { known: false };
   try {
-    const { markStandingStatus } = await import("./world2-claims.mjs");
-    status = await markStandingStatus({ slug: args.mark });
+    status = await standing({ slug: args.mark });
   } catch (e) {
     // Same posture as the promotion above: a store that is down must not swallow
     // a resident's stake. Loud, and the ledger still runs.
     console.error(`[world-stake] could not read the store's standing for "${args.mark}": ${String(e?.message ?? e)}`);
   }
-  const refusal = stakeRefusalFor({ mark: args.mark, n, promoted: !!putForward?.promoted, status });
+  const refusal = stakeRefusalFor({ mark: args.mark, n, promoted: !!putForward?.promoted, status, refused: promotionRefused });
   if (refusal) return refusal;
 
-  const staked = await runExec({ verb: "stake", handle: who.handle, mark: args.mark, n, via: "api", date: townDay() });
+  const staked = await ledger({ verb: "stake", handle: who.handle, mark: args.mark, n, via: "api", date: townDay() });
   if (staked?.error) return staked;
 
   // ── THE DOOR CLOSES ITS OWN LOOP (#2686) ─────────────────────────────────
@@ -512,7 +555,14 @@ export async function worldStakeViaOffice(args = {}, key = null) {
   // told.
   return putForward?.promoted
     ? { ...staked, put_forward: true, claim: putForward.claim,
-        effect: `✦${applied} stands behind it and that is what put it forward — it is on the public docket now, and locks or is refused by name at the next crossing.`
+        // A DRAFT THAT SLEPT THROUGH A CROSSING SAYS SO (postmark#2722). The
+        // deed files into the window the resident put it forward in, keeping
+        // the crossing it was composed in on its payload — so the answer names
+        // both windows rather than quietly moving one.
+        ...(putForward.late_from ? { late_from_crossing: putForward.late_from } : {}),
+        effect: (putForward.late_from
+          ? `your draft from crossing ${putForward.late_from} is put forward in window ${putForward.window} with ✦${applied} behind it — it is on the public docket now, and locks or is refused by name at the next crossing.`
+          : `✦${applied} stands behind it and that is what put it forward — it is on the public docket now, and locks or is refused by name at the next crossing.`)
           + (applied < n ? ` You asked for ✦${n}; your balance carried ✦${applied}, and ✦${applied} is what the ledger moved.` : "") }
     : staked;
 }
