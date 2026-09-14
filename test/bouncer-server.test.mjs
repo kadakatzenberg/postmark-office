@@ -25,11 +25,10 @@ before(async () => {
     join(ROOT, "src", "server.mjs"),
     "--port", String(PORT),
     "--db", dbPath,
+    "--bouncer-now-ms", FROZEN_BOUNCER_NOW_MS,
   ], {
     env: {
       ...process.env,
-      NODE_ENV: "test",
-      OFFICE_TEST_BOUNCER_NOW_MS: FROZEN_BOUNCER_NOW_MS,
       OFFICE_KEYS: `${KEY}=keemin:wright`,
       OFFICE_BOUNCER_KEY_READ_PER_MINUTE: "2",
       OFFICE_BOUNCER_KEY_WRITE_PER_MINUTE: "3",
@@ -85,8 +84,8 @@ test("REST and MCP middleware return exact 429s with independent key and househo
 
   // This is deliberately longer than one retry-after second. With a wall clock,
   // the bucket partially refills and the exact response below changes under
-  // scheduler/CPU load. The spawned server gets a test-only frozen bouncer
-  // clock so this HTTP integration test measures arithmetic, not elapsed time.
+  // scheduler/CPU load. The spawned server gets a fixed bouncer clock through
+  // its composition boundary so this test measures arithmetic, not elapsed time.
   await new Promise((resolve) => setTimeout(resolve, 1_100));
 
   const readRate = await call("/town");
