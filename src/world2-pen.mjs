@@ -78,16 +78,6 @@ export class LateCrossingError extends Error {
     this.name = "LateCrossingError"; this.crossing = crossing; this.open = open;
   }
 }
-// `lateArrival` — THE REASON AS AN ARGUMENT, not only as an environment
-// (postmark#2722, 2026-09-13). The env spelling was written for a human running
-// a backfill, and it is process-wide: the only way a CALLER could take this
-// path was to set a variable that then applied to every row the process wrote,
-// which is why no caller ever did. So the one caller that has a standing,
-// auditable reason — a stake putting forward a draft whose window has since
-// closed — could not say it, and the pen refused a lawful act instead. Sophia's
-// ✦1 was debited against a claim that never filed, twice, on 2026-09-12; Deva's
-// hit the same line the next morning. An explicit reason WINS over the env, so
-// a per-row remedy never depends on the ambient one and never widens it.
 // The lateness test itself, named once so the guard and the callers that need
 // to SAY a row arrived late cannot drift into two rules. `true` means the row's
 // crossing is old enough that it may only file with a reason, and that the pen
@@ -106,6 +96,16 @@ export function crossingIsLate(crossing, { now = Date.now() } = {}) {
 export const LATE_ARRIVAL_PUT_FORWARD =
   "a stake put a draft forward after the window it was composed in had closed (postmark#2722)";
 
+// `lateArrival` — THE REASON AS AN ARGUMENT, not only as an environment
+// (postmark#2722, 2026-09-13). The env spelling was written for a human running
+// a backfill, and it is process-wide: the only way a CALLER could take this
+// path was to set a variable that then applied to every row the process wrote,
+// which is why no caller ever did. So the one caller that has a standing,
+// auditable reason — a stake putting forward a draft whose window has since
+// closed — could not say it, and the pen refused a lawful act instead. Sophia's
+// ✦1 was debited against a claim that never filed, twice, on 2026-09-12; Deva's
+// hit the same line the next morning. An explicit reason WINS over the env, so
+// a per-row remedy never depends on the ambient one and never widens it.
 export function lateCrossingGuard(row, { now = Date.now(), env = process.env, lateArrival = null } = {}) {
   const open = currentCrossing(now);
   const c = row.crossing == null ? null : Number(row.crossing);
