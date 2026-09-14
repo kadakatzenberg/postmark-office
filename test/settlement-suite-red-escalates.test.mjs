@@ -159,7 +159,10 @@ function crossing(label, env = {}, { redSuite = true } = {}) {
   // takes when it cannot attribute the red to any mark.
   writeFileSync(join(seed, "package.json"), JSON.stringify({
     name: "world-fixture",
-    scripts: { test: redSuite ? `node -e ${JSON.stringify(RED_SUITE_RUNNER)}` : 'node -e ""' },
+    // Both names, one runner: since postmark#2790 the crossing asks the world for
+    // `test:candle`, and a fixture that answers only `test` reads as a RED suite
+    // (missing script) — which turned the green control red on the merged train.
+    scripts: (() => { const run = redSuite ? `node -e ${JSON.stringify(RED_SUITE_RUNNER)}` : 'node -e ""'; return { test: run, 'test:candle': run }; })(),
   }));
   g(".", "init", "-q", "-b", "main", seed);
   g(seed, "config", "user.email", "seed@postmark.invalid");
