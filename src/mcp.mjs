@@ -932,7 +932,11 @@ export function handleMcp(req, res, ctx) {
 
     if (replies.length === 0) { res.writeHead(202); return res.end(); } // pure notifications
     const body = JSON.stringify(Array.isArray(parsed) ? replies : replies[0]);
-    const headers = { "content-type": "application/json", "x-postmark-as-of": ctx.asOf };
+    // THE LENGTH, SAID (Mari, office#45, 2026-09-14): the whole body is built above,
+    // so the reply carries content-length and not chunked framing. The origin was
+    // never the cut, but a strict client or a tunnel that tears down at a chunk
+    // boundary has one less way to lose the tail of a 73 KB world read.
+    const headers = { "content-type": "application/json", "content-length": Buffer.byteLength(body), "x-postmark-as-of": ctx.asOf };
     // A write attempt on an unsigned door: keep the 401 + WWW-Authenticate so
     // MCP clients begin the GitHub sign-in dance (the body still carries the bounce).
     if (ctx.authChallenge && ctx.wwwAuth) { ctx.wwwAuth(res); res.writeHead(401, headers); }
