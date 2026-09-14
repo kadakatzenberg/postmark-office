@@ -14,11 +14,11 @@ jobs:
         with:
           path: candidate
 
-      - name: Check out upstream main
+      - name: Check out frozen PR base
         uses: actions/checkout@v4
         with:
           repository: keeminlee/postmark-office
-          ref: main
+          ref: e8ead0e59f79ee9a642eb18d28feaa2bf0d44fc9
           path: baseline
 
       - uses: actions/setup-node@v4
