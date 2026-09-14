@@ -255,7 +255,23 @@ export async function claimTxFromJournal(client, row, seq, { household, actId = 
           `SELECT id FROM claims WHERE window_id = $1 AND status = 'pending'
            AND geometry->>'slug' = $2 AND claimant = $3 ORDER BY submitted_at DESC LIMIT 1`,
           [win.id, slug, row.actor]);
-        supersedes = prior?.id ?? null; // amending a published mark: no in-window chain, fresh claim
+        // NO PENDING PRIOR IN THIS WINDOW → THE STANDING MARK IS WHAT IT AMENDS
+        // (2026-09-14, #2806). This used to leave `supersedes` null with the note
+        // "amending a published mark: no in-window chain, fresh claim", and the
+        // clearing's step 1 read that null as a duplicate — "a standing mark
+        // already carries this slug" — refusing every live amendment of a
+        // published mark while 1.0 canon published it (keith/the-garage, journal
+        // seq 1509, refused at the candle, published at the 09-11 05:45Z sweep).
+        // 001_tables.sql says what was meant: "a slug amended at a later window
+        // gets a new locked claim whose `supersedes` points back at this id" —
+        // the same row the clearing reads (`FROM marks WHERE slug … standing`).
+        // The replay path always set it; the live drain now does too.
+        if (prior?.id) supersedes = prior.id;
+        else {
+          const { rows: [standing] } = await client.query(
+            "SELECT id::text FROM marks WHERE slug = $1 AND status = 'standing' LIMIT 1", [slug]);
+          supersedes = standing?.id ?? null; // a fresh slug amends nothing: null, as before
+        }
       }
 
       // THE DEFERRED ACT rides on the draft it belongs to (world2-acts.mjs
