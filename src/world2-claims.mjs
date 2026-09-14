@@ -255,7 +255,23 @@ export async function claimTxFromJournal(client, row, seq, { household, actId = 
           `SELECT id FROM claims WHERE window_id = $1 AND status = 'pending'
            AND geometry->>'slug' = $2 AND claimant = $3 ORDER BY submitted_at DESC LIMIT 1`,
           [win.id, slug, row.actor]);
-        supersedes = prior?.id ?? null; // amending a published mark: no in-window chain, fresh claim
+        // NO PENDING PRIOR IN THIS WINDOW → THE STANDING MARK IS WHAT IT AMENDS
+        // (2026-09-14, #2806). This used to leave `supersedes` null with the note
+        // "amending a published mark: no in-window chain, fresh claim", and the
+        // clearing's step 1 read that null as a duplicate — "a standing mark
+        // already carries this slug" — refusing every live amendment of a
+        // published mark while 1.0 canon published it (keith/the-garage, journal
+        // seq 1509, refused at the candle, published at the 09-11 05:45Z sweep).
+        // 001_tables.sql says what was meant: "a slug amended at a later window
+        // gets a new locked claim whose `supersedes` points back at this id" —
+        // the same row the clearing reads (`FROM marks WHERE slug … standing`).
+        // The replay path always set it; the live drain now does too.
+        if (prior?.id) supersedes = prior.id;
+        else {
+          const { rows: [standing] } = await client.query(
+            "SELECT id::text FROM marks WHERE slug = $1 AND status = 'standing' LIMIT 1", [slug]);
+          supersedes = standing?.id ?? null; // a fresh slug amends nothing: null, as before
+        }
       }
 
       // THE DEFERRED ACT rides on the draft it belongs to (world2-acts.mjs
@@ -493,11 +509,42 @@ export async function promoteDraftOnStake({ actor, householdName, slug, stamps =
     // raised — after the promotion had already committed." Insert, then promote
     // and stamp in one statement, and there is nothing left for a second write
     // to do.
+    // ── A DRAFT THAT OUTLIVED ITS WINDOW IS A LATE ARRIVAL, NOT A REFUSAL ──
+    //
+    // (postmark#2722, hotfix w38.) The act being released here carries the
+    // crossing the draft was COMPOSED in, and a resident may sleep on a draft
+    // for as long as they like. Once that window closes and is certified, the
+    // pen's late-crossing guard refused the insert — correctly, on its own
+    // terms — this whole transaction rolled back, and the stake door's catch
+    // logged and let the LEDGER run anyway. The books said ✦1 staked and every
+    // mark surface said a zero-backed draft. Sophia hit it twice at 18:24:29Z
+    // and 18:25:24Z on 2026-09-12 (a draft from crossing 183 against open
+    // window 185); Deva's 03:35Z 09-13 stake hit the same line at 184/186.
+    //
+    // The remedy is the one the guard's own message names: a late arrival files
+    // into the window it ARRIVES in, keeping its original crossing on the
+    // payload as `late_from_crossing`. Nothing is rewritten in certified
+    // history, and the deed lands in the window the resident actually put the
+    // mark forward in — which is the truthful place for it, because putting
+    // forward is what this act IS.
+    //
+    // THE CLAIM ROW NEEDS NO SUCH REMEDY, and that is worth saying so nobody
+    // adds one: 007's own `claims_update_guard` spells the SUBMIT transition
+    // "draft -> pending ... window_id and submitted_at move with it: a draft
+    // rides no candle, and it takes the one burning at the moment it is put
+    // forward." The UPDATE below already moves the row into the open window in
+    // place, keeping its uuid, which is exactly what that rule asks for. Only
+    // the deed was ever stuck.
     let releasedActId = null;
+    let lateFrom = null;
     if (draft.held) {
-      const { insertAct } = await import("./world2-pen.mjs");
+      const { insertAct, crossingIsLate, LATE_ARRIVAL_PUT_FORWARD } = await import("./world2-pen.mjs");
       const { _seq, ...actRow } = draft.held;
-      releasedActId = await insertAct(c, { ...actRow, written_at: new Date().toISOString() }, _seq ?? null);
+      // Asked BEFORE the insert and through the pen's own predicate, so what
+      // the resident is told and what the pen did are one fact, not two.
+      if (crossingIsLate(actRow.crossing)) lateFrom = Number(actRow.crossing);
+      releasedActId = await insertAct(c, { ...actRow, written_at: new Date().toISOString() }, _seq ?? null,
+        { lateArrival: LATE_ARRIVAL_PUT_FORWARD });
     }
     await c.query(
       `UPDATE claims SET status = 'pending', window_id = $1, submitted_at = now(),
@@ -507,11 +554,14 @@ export async function promoteDraftOnStake({ actor, householdName, slug, stamps =
                              ELSE jsonb_build_object('_act_id', $4::text) END
         WHERE id = $3`,
       [win.id, Number(stamps) || 0, draft.id, releasedActId == null ? null : String(releasedActId)]);
-    return draft;
+    return { ...draft, lateFrom };
   });
-  if (!out) return { promoted: false, claim: null, window: win.id };
+  if (!out) return { promoted: false, claim: null, window: win.id, late_from: null };
   state.submitted += 1;
-  return { promoted: true, claim: out.id, window: win.id };
+  // `late_from` — the crossing the draft was composed in, present ONLY when the
+  // pen restamped the released deed into this window. The door says it in
+  // words; a null here means the ordinary same-window promotion.
+  return { promoted: true, claim: out.id, window: win.id, late_from: out.lateFrom ?? null };
 }
 
 /**

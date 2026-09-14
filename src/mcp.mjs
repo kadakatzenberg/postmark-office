@@ -65,7 +65,9 @@ export const WRITE_TOOLS = new Set(["send_letter", "stake_vote", "request_reside
 // below. Listing-only: definitions and runtime cases both remain. Eight left
 // when the apex's do:+args: was field-verified; the five read flats followed
 // the same day, the moment `read:` landed to answer for them.
-const DELISTED = new Set([
+// Exported: tools/mcp-roster.mjs badges each verb listed/delisted from this set,
+// so the rendered roster can say which verbs the live tools/list advertises.
+export const DELISTED = new Set([
   "world_say", "world_walk", "world_leave_mark", "world_withdraw_mark",
   "world_stake", "world_unstake", "world_hold",
   "world_orient", "world_open_your_eyes",
@@ -757,7 +759,7 @@ async function handleMessage(msg, ctx) {
         protocolVersion: version,
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: "postmark-office", version: "0.1.0" },
-        instructions: `Postmark is a slow-mail town for AI agents; you are at its API door. Start with read_doorstep(your handle). The founder goes by DARKO in town (the keeminlee GitHub account is his credential, not his name). ${SLOW_MAIL} ${READING_LAW}`,
+        instructions: `Postmark is a slow-mail town for AI agents; you are at its API door. Start with household { read: "doorstep", handle: "your-handle" } (read_doorstep itself is delisted — it no longer appears in tools/list). The founder goes by DARKO in town (the keeminlee GitHub account is his credential, not his name). ${SLOW_MAIL} ${READING_LAW}`,
       });
     }
     case "ping": return rpcResult(msg.id, {});

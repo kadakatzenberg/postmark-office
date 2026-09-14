@@ -2193,6 +2193,80 @@ async function groundMinimumStake(clean, canon) {
 }
 
 /**
+ * THE ESCROW ALREADY BEHIND A MARK — the one reader for both halves of the
+ * amendment answer (#2614, hotfix w38.3).
+ *
+ * `world_stake_read` is the ledger's own door and the figure the reply has
+ * always quoted; this is that same read, named once so the act's verdict and
+ * the sentence the resident is shown cannot come from two different questions.
+ *
+ * ZERO ON A READ THAT CANNOT ANSWER, deliberately, and it is the same bargain
+ * `groundMinimumStake` takes above: a ledger that is down leaves an amendment
+ * standing as its author's private draft, which they can put forward again in
+ * one call. The other direction would publish on a guess.
+ */
+async function escrowBehindMark(mark) {
+  try {
+    const sr = await callWorldStakeTool("world_stake_read", { mark });
+    const n = Number(sr?.escrow);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch { return 0; }
+}
+
+/**
+ * THE BOUNDARY, AS ONE PURE VERDICT (#2614, hotfix w38.3) — pure and exported
+ * for the reason `overhangOf` and `publishNoteFor` below are: it can be
+ * falsified without a clone, a credential or a write.
+ *
+ * It exists as a function rather than an expression because TWO things read it
+ * and they were reading different facts. The claim's status came from the act's
+ * stamps; the sentence the resident was shown came from the mark's escrow. Both
+ * reads were correct and the answer they made together was a lie — "the
+ * amendment publishes at the next crossing" printed over a row filed `draft`.
+ * Naming the verdict once is what makes the disagreement unrepresentable:
+ * `amendmentPublishNote` takes THIS object, so a sentence promising publication
+ * cannot be produced for a mark this function did not put forward.
+ *
+ * The rule itself, unchanged in substance and widened by one clause:
+ *   · a stake on THIS act that clears the ground        → forward (as before)
+ *   · an AMENDMENT whose mark already holds that much   → forward (the fix)
+ *   · anything else                                     → the author's draft
+ *
+ * On own ground `groundMin` is 0, so amending your own parcel goes forward with
+ * nothing behind it — the same reason `stamps: 0` is a deliberate putting-
+ * forward there and not a no-op.
+ */
+export function putForwardVerdict({ staking = false, stamps = 0, amending = false, escrowBehind = 0, groundMin = 1 } = {}) {
+  const min = Number(groundMin);
+  const behind = Number(escrowBehind) || 0;
+  const byStake = staking === true && Number(stamps) >= min;
+  const byStanding = amending === true && behind >= min;
+  return {
+    put_forward: byStake || byStanding,
+    // WHICH FACT CARRIED IT, for the sentence and for a reader of the log. Not
+    // a tiebreak: a staked amendment on a backed mark is both, and the stake is
+    // named because it is the thing the author just did.
+    carried_by: byStake ? "stake" : byStanding ? "standing-escrow" : null,
+    escrow_behind: amending === true ? behind : 0,
+  };
+}
+
+/**
+ * THE AMENDMENT'S PUBLISH SENTENCE — the other half of the same verdict.
+ *
+ * `null` means "say nothing about publishing here", and it is the ONLY answer
+ * available for a verdict that did not put the mark forward. That is the whole
+ * repair: the promise is structurally unreachable from a draft.
+ */
+export function amendmentPublishNote(verdict) {
+  if (verdict?.put_forward !== true) return null;
+  const behind = Number(verdict.escrow_behind) || 0;
+  return behind > 0
+    ? `✦${behind} already stand in escrow behind it — the amendment publishes at the next crossing.`
+    : "it stands on your own household's ground, where nothing needs buying — the amendment publishes at the next crossing.";
+}
+
+/**
  * WHOSE GROUND IS THIS — the same rule, answered as a TRI-STATE.
  *
  * `true` own ground · `false` the commons · `null` the office cannot tell.
@@ -2345,10 +2419,41 @@ async function journalLeaveMark(clean, { crossing = currentCrossing() } = {}) {
     // Computed here rather than at the door's mouth because `canon` is already
     // open on this line — the ground question is a canon question, and opening
     // the record twice to ask it once is how the two halves would drift.
+    //
+    // ── AN AMENDMENT IS RULED ON THE MARK'S ESCROW, NOT ONLY THIS ACT'S ────
+    //
+    // (#2614, hotfix w38.3.) The rule above reads the ACT. That is right for a
+    // mark being left for the first time, and wrong for one being amended: the
+    // stake rides the id, not the text, so a mark already standing with escrow
+    // behind it has ALREADY been put forward — and an amendment carrying no
+    // `stamps:` was filing itself as a private draft anyway. The reply said so
+    // and, in the same breath, said the opposite: `disclosePublishing` read the
+    // MARK's escrow and promised "the amendment publishes at the next
+    // crossing" for a claim this line had just ruled a draft. One answer, two
+    // truths, and the resident's word never reached the docket — measured on
+    // the 09-13 scratch as ten of Deva's amendments sitting at `status: draft`,
+    // `stake: 0`, one of them since 09-06.
+    //
+    // So the verdict is one verdict now: an amendment goes forward when the
+    // escrow ALREADY behind the mark clears the ground it stands on, exactly as
+    // a fresh stake of that size would. On the author's own ground the minimum
+    // is zero and there is nothing to read — amending your own parcel is a
+    // putting-forward for the same reason `stamps: 0` is.
+    //
+    // The escrow read is the SAME read the reply's sentence made, moved ahead
+    // of the ruling instead of behind it, and it is not an extra call: the
+    // sentence no longer makes its own (§ disclosePublishing). A read that
+    // cannot answer counts as zero — the safe direction this file already
+    // argues for at `groundMinimumStake`, where the failure mode is "your mark
+    // stayed private", never "your mark published for free on someone else's
+    // land".
     const staking = clean.stamps !== undefined && clean.stamps !== null;
     const stakeN = staking ? Number(clean.stamps) : 0;
-    const ground = staking ? await groundMinimumStake(clean, canon) : null;
-    const putForward = staking && stakeN >= ground.min;
+    const ground = staking || amending ? await groundMinimumStake(clean, canon) : null;
+    const escrowBehind = amending ? await escrowBehindMark(id) : 0;
+    const verdict = putForwardVerdict({
+      staking, stamps: stakeN, amending, escrowBehind, groundMin: ground?.min ?? 1 });
+    const putForward = verdict.put_forward;
 
     // The refusal is a refusal to PUBLISH, never a refusal to save: the
     // declaration stands as the author's own private draft either way, and they
@@ -2439,7 +2544,14 @@ async function journalLeaveMark(clean, { crossing = currentCrossing() } = {}) {
       seq: row.seq, crossing: row.crossing, log: row.record ?? "journal",
       witnesses: row.witnesses ? JSON.parse(row.witnesses) : null,
       ...(amending ? { amended: true, moved: false,
-        superseded: "the prior declaration — every version stays in the log; canon shows the latest at the next crossing" } : {}),
+        superseded: "the prior declaration — every version stays in the log; canon shows the latest at the next crossing",
+        // INTERNAL, and stripped before the answer leaves the door
+        // (§ disclosePublishing): THE VERDICT ITSELF, handed forward so the
+        // sentence is derived from the same object that set the status rather
+        // than from a second question to a second door. Underscored and deleted
+        // rather than published, because a hotfix is no place to add a word to
+        // the door's grammar.
+        _verdict: verdict } : {}),
       // ── which side of the boundary this act left the mark on ──────────────
       put_forward: putForward,
       ...(ground?.ground ? { on_your_ground: ground.ground } : {}),
@@ -2860,6 +2972,39 @@ export function publishNoteFor({ id, parent, by, marks, residentsOf }) {
 async function disclosePublishing(result, by) {
   try {
     if (!result?.id) return;
+    // ── ONE VERDICT, ONE SENTENCE (#2614, hotfix w38.3) ───────────────────
+    //
+    // This block used to ask the ledger its own question — "does the mark
+    // carry escrow?" — and promise publication on the answer, while the act
+    // above had ruled the claim a private draft off a different question
+    // ("did THIS act carry stamps?"). Both were true reads; together they were
+    // a reply that told a resident their amendment would publish at the next
+    // crossing and filed it where no crossing would ever see it. Deva waited
+    // two settlements on that sentence.
+    //
+    // The act now rules on the mark's standing escrow itself, so this reads
+    // ITS verdict. The sentence cannot outrun the status any more, because
+    // there is only one thing left to read.
+    const carried = result._verdict;
+    delete result._verdict;                            // internal — never answered
+    if (result.amended && carried) {
+      // THE LIVE PATH (WORLD_SINGLE_LOG=1, which is what prod runs): the note
+      // is derived from the verdict that set this answer's status, so it is
+      // null for anything filed as a draft and there is nothing left to
+      // disagree with.
+      const note = amendmentPublishNote(carried);
+      if (note) { result.publishing = { note }; return; }
+    } else if (result.amended) {
+      // THE 1.0 GIT PATH, unchanged on purpose. It rules no verdict and writes
+      // no claim — an amendment there publishes at the drain, so the old
+      // read-and-say is TRUE on this path and this hotfix is not the place to
+      // rework a door prod does not run.
+      const sr = await callWorldStakeTool("world_stake_read", { mark: result.id }).catch(() => null);
+      if (Number(sr?.escrow) > 0) {
+        result.publishing = { note: `✦${sr.escrow} already stand in escrow behind it — the amendment publishes at the next crossing.` };
+        return;
+      }
+    }
     const w = await world();
     const note = publishNoteFor({
       id: result.id, parent: result.parent ?? null, by,
@@ -2867,15 +3012,6 @@ async function disclosePublishing(result, by) {
       residentsOf: (h) => householdOf(h)?.residents ?? null,
     });
     if (!note) return;
-    // An AMENDED mark may already carry escrow — the stake rides the id, not
-    // the text — so the commons warning would be false; say the true thing.
-    if (result.amended) {
-      const sr = await callWorldStakeTool("world_stake_read", { mark: result.id }).catch(() => null);
-      if (Number(sr?.escrow) > 0) {
-        result.publishing = { note: `✦${sr.escrow} already stand in escrow behind it — the amendment publishes at the next crossing.` };
-        return;
-      }
-    }
     result.publishing = note;
   } catch { /* the note is a courtesy — the mark already stands */ }
 }
