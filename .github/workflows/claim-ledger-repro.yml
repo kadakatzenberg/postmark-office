@@ -29,64 +29,51 @@ jobs:
           path = Path("test/claim-ledger.test.mjs")
           text = path.read_text()
           old_marker = "const PORT = 43901;\nconst GH_PORT = 43902;\nconst BASE = `http://127.0.0.1:${PORT}`;"
-          new_marker = '''// Both listeners belong to this test process. Asking the kernel for their ports
-// means another lane can run the same file on the same box without becoming
-// shared state for this one.
-let BASE;'''
+          marker_lines = [
+              "// Both listeners belong to this test process. Asking the kernel for their ports",
+              "// means another lane can run the same file on the same box without becoming",
+              "// shared state for this one.",
+              "let BASE;",
+          ]
+          new_marker = "\n".join(marker_lines)
+          gh_listen = "\n".join([
+              "  let ghBase;",
+              "  await new Promise((ok, no) => {",
+              "    const fail = (error) => no(error);",
+              "    ghServer.once(\"error\", fail);",
+              "    ghServer.listen(0, \"127.0.0.1\", () => {",
+              "      ghServer.off(\"error\", fail);",
+              "      ghBase = `http://127.0.0.1:${ghServer.address().port}`;",
+              "      ok();",
+              "    });",
+              "  });",
+          ])
+          office_ready = "\n".join([
+              "  let officePort = null;",
+              "  child.stdout.on(\"data\", (data) => {",
+              "    const match = /listening on :(\\d+)/.exec(String(data));",
+              "    if (match) officePort = Number(match[1]);",
+              "  });",
+              "  await awaitListening(child);",
+              "  assert.ok(officePort, \"the office announces its kernel-assigned port\");",
+              "  BASE = `http://127.0.0.1:${officePort}`;",
+          ])
 
           if old_marker in text:
-              text = text.replace(old_marker, new_marker, 1)
-              text = text.replace(
-                  'const url = new URL(req.url, `http://127.0.0.1:${GH_PORT}`);',
-                  'const url = new URL(req.url, "http://127.0.0.1");',
-                  1,
-              )
-              text = text.replace(
-                  '  await new Promise((ok) => ghServer.listen(GH_PORT, ok));',
-                  '''  let ghBase;
-  await new Promise((ok, no) => {
-    const fail = (error) => no(error);
-    ghServer.once("error", fail);
-    ghServer.listen(0, "127.0.0.1", () => {
-      ghServer.off("error", fail);
-      ghBase = `http://127.0.0.1:${ghServer.address().port}`;
-      ok();
-    });
-  });''',
-                  1,
-              )
-              text = text.replace(
-                  '  child = spawn(process.execPath, [join(ROOT, "src", "server.mjs"), "--port", String(PORT),',
-                  '  child = spawn(process.execPath, [join(ROOT, "src", "server.mjs"), "--port", "0",',
-                  1,
-              )
-              text = text.replace(
-                  '      GITHUB_AUTH_URL: `http://127.0.0.1:${GH_PORT}/login/oauth/authorize`,',
-                  '      GITHUB_AUTH_URL: `${ghBase}/login/oauth/authorize`,',
-                  1,
-              )
-              text = text.replace(
-                  '      GITHUB_TOKEN_URL: `http://127.0.0.1:${GH_PORT}/login/oauth/access_token`,',
-                  '      GITHUB_TOKEN_URL: `${ghBase}/login/oauth/access_token`,',
-                  1,
-              )
-              text = text.replace(
-                  '      GITHUB_API_URL: `http://127.0.0.1:${GH_PORT}`,',
-                  '      GITHUB_API_URL: ghBase,',
-                  1,
-              )
-              text = text.replace(
-                  '  await awaitListening(child);',
-                  '''  let officePort = null;
-  child.stdout.on("data", (data) => {
-    const match = /listening on :(\\d+)/.exec(String(data));
-    if (match) officePort = Number(match[1]);
-  });
-  await awaitListening(child);
-  assert.ok(officePort, "the office announces its kernel-assigned port");
-  BASE = `http://127.0.0.1:${officePort}`;''',
-                  1,
-              )
+              replacements = [
+                  (old_marker, new_marker),
+                  ('const url = new URL(req.url, `http://127.0.0.1:${GH_PORT}`);', 'const url = new URL(req.url, "http://127.0.0.1");'),
+                  ('  await new Promise((ok) => ghServer.listen(GH_PORT, ok));', gh_listen),
+                  ('  child = spawn(process.execPath, [join(ROOT, "src", "server.mjs"), "--port", String(PORT),', '  child = spawn(process.execPath, [join(ROOT, "src", "server.mjs"), "--port", "0",'),
+                  ('      GITHUB_AUTH_URL: `http://127.0.0.1:${GH_PORT}/login/oauth/authorize`,', '      GITHUB_AUTH_URL: `${ghBase}/login/oauth/authorize`,'),
+                  ('      GITHUB_TOKEN_URL: `http://127.0.0.1:${GH_PORT}/login/oauth/access_token`,', '      GITHUB_TOKEN_URL: `${ghBase}/login/oauth/access_token`,'),
+                  ('      GITHUB_API_URL: `http://127.0.0.1:${GH_PORT}`,', '      GITHUB_API_URL: ghBase,'),
+                  ('  await awaitListening(child);', office_ready),
+              ]
+              for old, new in replacements:
+                  if old not in text:
+                      raise SystemExit(f"missing expected claim-ledger seam: {old}")
+                  text = text.replace(old, new, 1)
               path.write_text(text)
           elif new_marker not in text:
               raise SystemExit("claim-ledger port seam is neither original nor repaired")
