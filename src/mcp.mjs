@@ -65,7 +65,9 @@ export const WRITE_TOOLS = new Set(["send_letter", "stake_vote", "request_reside
 // below. Listing-only: definitions and runtime cases both remain. Eight left
 // when the apex's do:+args: was field-verified; the five read flats followed
 // the same day, the moment `read:` landed to answer for them.
-const DELISTED = new Set([
+// Exported: tools/mcp-roster.mjs badges each verb listed/delisted from this set,
+// so the rendered roster can say which verbs the live tools/list advertises.
+export const DELISTED = new Set([
   "world_say", "world_walk", "world_leave_mark", "world_withdraw_mark",
   "world_stake", "world_unstake", "world_hold",
   "world_orient", "world_open_your_eyes",
