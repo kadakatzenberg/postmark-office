@@ -945,7 +945,12 @@ SWEEP_JSON="$WORK/sweep.json"
 # run own its residue whether or not the tests ever learn to.
 SUITE_TMP="$WORK/tmp"; mkdir -p "$SUITE_TMP"
 ISOLATE_JSON=""
-if ! (cd "$SWEEP" && TMPDIR="$SUITE_TMP" TMP="$SUITE_TMP" TEMP="$SUITE_TMP" npm test --silent) > "$WORK/suite.log" 2>&1; then
+  # THE CANDLE GATES ON BEHAVIOUR SUITES ONLY (founder-ruled 2026-09-14, postmark-town/postmark#2790):
+  # `test:candle` is the world's own runner that withholds every test titled "[pin] " — a
+  # source-pin or text-reading assertion — and refuses to gate (exit 2) if the marker matched
+  # nothing. Those pins run on the world's pull-request workflow instead. The S70 refusal
+  # (2026-09-14 05:45Z) was a lawful viewer change tripping a caller COUNT read as text.
+if ! (cd "$SWEEP" && TMPDIR="$SUITE_TMP" TMP="$SUITE_TMP" TEMP="$SUITE_TMP" npm run test:candle --silent) > "$WORK/suite.log" 2>&1; then
   cp "$WORK/suite.log" "$OFFICE/settlement-last-suite.log" 2>/dev/null || true
   # ── THE ISOLATION PASS (2026-08-27) ────────────────────────────────────────
   # A red suite used to mean nobody settles. It now means: find out WHOSE mark

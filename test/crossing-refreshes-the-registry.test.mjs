@@ -156,7 +156,7 @@ process.stdout.write(JSON.stringify({
   surveyed: { branches: drafts.length, delta_rows: drafts.length, escrow_backed_deltas: 0 },
 }) + "\\n");
 `);
-  writeFileSync(join(seed, "package.json"), JSON.stringify({ name: "world-fixture", scripts: { test: "node -e \"\"" } }));
+  writeFileSync(join(seed, "package.json"), JSON.stringify({ name: "world-fixture", scripts: { test: "node -e \"\"", "test:candle": "node -e \"\"" } }));
   g(".", "init", "-q", "-b", "main", seed);
   g(seed, "config", "user.email", "seed@postmark.invalid");
   g(seed, "config", "user.name", "seed");
