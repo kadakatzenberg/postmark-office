@@ -5,16 +5,46 @@ on:
     branches:
       - fix/bouncer-server-clock
 
+permissions:
+  contents: write
+
 jobs:
   bouncer:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: fix/bouncer-server-clock
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Patch the server composition root
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("src/server.mjs")
+          text = path.read_text()
+          old = "const bouncer = new Bouncer();"
+          if text.count(old) != 1:
+              raise SystemExit(f"expected one untouched bouncer construction, found {text.count(old)}")
+          new = '''// Keep the deterministic clock seam at the process boundary. Bouncer stays
+// environment-agnostic, while the HTTP integration test can pin only its clock.
+// Production omits the flag and therefore keeps Date.now exactly as before.
+const bouncerNowArg = arg("--bouncer-now-ms", null);
+const bouncerNow = (() => {
+  if (bouncerNowArg === null) return Date.now;
+  const fixed = Number(bouncerNowArg);
+  if (!Number.isFinite(fixed))
+    throw new Error("--bouncer-now-ms must be a finite millisecond timestamp");
+  return () => fixed;
+})();
+const bouncer = new Bouncer({ now: bouncerNow });'''
+          path.write_text(text.replace(old, new))
+          PY
+          git diff --check
       - name: Run focused suites
         shell: bash
         run: |
@@ -30,6 +60,14 @@ jobs:
           path: |
             bouncer-test.txt
             bouncer-exit.txt
-      - name: Preserve test result
+      - name: Require green before commit
         shell: bash
         run: exit "$(cat bouncer-exit.txt)"
+      - name: Commit verified repair
+        shell: bash
+        run: |
+          git config user.name "kadakatzenberg"
+          git config user.email "131329396+kadakatzenberg@users.noreply.github.com"
+          git add src/server.mjs
+          git commit -m "fix: inject bouncer clock at server boundary"
+          git push origin HEAD:fix/bouncer-server-clock
