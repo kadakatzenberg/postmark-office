@@ -2602,7 +2602,12 @@ async function apexDo(args, key, ctx = {}) {
  * `handle` is exempt everywhere: it is the standpoint field, merged in from the
  * top level a few lines below and read by `call` itself.
  */
-const WORLD_READ_FIELDS = Object.freeze({
+// ⛔ EXPORTED SO A PROBE CAN DRIVE IT, the same reason `readDomainFor` is
+// (#2559). A source-text scan can see that a field is DECLARED; only the object
+// can be compared against the flat tool's own schema, which is the check that
+// says whether a field the tool takes is carried, refused by name, or dropped.
+// `HOUSEHOLD_READ_FIELDS` is exported for the same reason one door over.
+export const WORLD_READ_FIELDS = Object.freeze({
   // `text` here and `stance` below are DECLARED so that `readDomainFor`'s own
   // teaching bounce is the one the caller meets. They are not "accepted": each
   // is answered with "a read never performs" and the door that does perform it
@@ -2610,7 +2615,23 @@ const WORLD_READ_FIELDS = Object.freeze({
   // caller who typed read: where they meant do: actually needs. Declared on the
   // ONE read that teaches about them, so `read: "walk", args: { text }` still
   // bounces by name.
-  say: { text: { type: "string", description: "refused — a read never performs; speak with do: \"say\"" } },
+  // ⚑ `since` IS THE ROOM'S CURSOR AND IT IS NOT THE TOP-LEVEL `since:` (#2559).
+  //
+  // The two are different clocks that share a name, and saying so here is the
+  // whole repair: top-level `since:` is a CROSSING NUMBER and buys `happened`,
+  // the delta that rides every read; THIS one is the `latest` stamp the flat
+  // `world_say` hands back, in milliseconds, and buys a room with only what is
+  // new in it. A resident who passed the crossing cursor and watched the whole
+  // room come back with a 200 had asked the right question of the wrong clock,
+  // and nothing at this door said which was which.
+  //
+  // Threading the top-level number into the room instead would have been worse
+  // than dropping it: a crossing number compared against millisecond stamps
+  // filters nothing, silently, and the read would look cursored while doing
+  // exactly what it does today. So the room's cursor rides where a read's own
+  // fields ride — in `args:` — and says what it is.
+  say: { text: { type: "string", description: "refused — a read never performs; speak with do: \"say\"" },
+         since: { type: "number", description: "the `latest` stamp from your previous say-read — you hear only voices newer than it, and the room's shape rides either way. Milliseconds, and NOT the top-level since: (which is a crossing number, and buys `happened`)." } },
   walk: {},
   "leave-mark": { mark: { type: "string", description: "one mark to look into — <by>/<slug>" },
                   depth: { type: "number", description: "how far down to descend into that mark" },
@@ -2653,7 +2674,15 @@ export async function readDomainFor(action, fields, key, oriented, ctx = {}) {
   switch (action) {
     case "say": {
       if (fields?.text) return { error: "bounce", code: 422, defect: "a read never performs", hint: `to speak, use do: — world { do: "say", args: { text: … } }. read: "say" only listens.` };
-      return { heard: await call("world_say", {}) };
+      // ⚑ THE CURSOR TRAVELS (#2559). This call was `{}` — the flat tool takes
+      // three fields, `handle` rides in from `call` itself, `text` is refused by
+      // name above, and `since` was simply dropped. So the one field left was
+      // the one thrown away: a resident polling the quay through this shadow
+      // re-bought the whole room every call, with a 200 and nothing saying so.
+      // A field a door does not carry must be refused by name; this one it can
+      // carry, so it does. The shadow now hands over everything `world_say`
+      // takes and drops nothing.
+      return { heard: await call("world_say", fields?.since == null ? {} : { since: fields.since }) };
     }
     case "walk": {
       // BOUND BY RADIUS, NOT BY TRUNCATING THE ROLL. This read was 33 KB
