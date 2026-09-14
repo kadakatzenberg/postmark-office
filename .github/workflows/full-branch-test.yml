@@ -1,4 +1,4 @@
-name: Full branch test
+name: Full branch comparison
 
 on:
   push:
@@ -6,13 +6,75 @@ on:
       - fix/bouncer-server-clock
 
 jobs:
-  test:
+  compare:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out candidate
+        uses: actions/checkout@v4
+        with:
+          path: candidate
+
+      - name: Check out upstream main
+        uses: actions/checkout@v4
+        with:
+          repository: keeminlee/postmark-office
+          ref: main
+          path: baseline
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npm test
+
+      - name: Install candidate
+        working-directory: candidate
+        run: npm ci
+
+      - name: Install baseline
+        working-directory: baseline
+        run: npm ci
+
+      - name: Run candidate suite
+        shell: bash
+        run: |
+          set +e
+          cd candidate
+          npm test > ../candidate-test.txt 2>&1
+          code=$?
+          echo "$code" > ../candidate-exit.txt
+          grep '^not ok' ../candidate-test.txt > ../candidate-not-ok.txt || true
+          exit 0
+
+      - name: Run baseline suite
+        shell: bash
+        run: |
+          set +e
+          cd baseline
+          npm test > ../baseline-test.txt 2>&1
+          code=$?
+          echo "$code" > ../baseline-exit.txt
+          grep '^not ok' ../baseline-test.txt > ../baseline-not-ok.txt || true
+          exit 0
+
+      - name: Write comparison summary
+        shell: bash
+        run: |
+          {
+            echo "candidate_exit=$(cat candidate-exit.txt)"
+            echo "baseline_exit=$(cat baseline-exit.txt)"
+            echo
+            echo "=== candidate not ok ==="
+            cat candidate-not-ok.txt
+            echo
+            echo "=== baseline not ok ==="
+            cat baseline-not-ok.txt
+          } > comparison-summary.txt
+          cat comparison-summary.txt
+
+      - name: Upload comparison evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: bouncer-full-suite-comparison
+          path: |
+            comparison-summary.txt
+            candidate-test.txt
+            baseline-test.txt
