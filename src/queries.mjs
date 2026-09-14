@@ -210,12 +210,42 @@ export const TOWN_OFFICES_CAP = 25;
 // cards, not from here. So the array stays an array under the same key and
 // nothing has to learn a new shape to keep working; what is new is only that
 // the answer now SAYS when it stopped listing.
+// ── ONE ROLL, AND THIS READ NO LONGER KEEPS A SECOND ONE (#1981) ────────────
+//
+// `counts.residents` came out of `meta.hydrated_counts` — a snapshot stamped at
+// hydration from the VENDORED roll, which enumerates WHITE_PAGES with a name
+// list (`vendor/town.mjs`: `n !== "TEMPLATE"`). A name list is not a rule, so
+// the second non-resident directory the town grew walked straight through it,
+// and this door published 166 residents while `/metrics/mail` and `/residents`
+// — both counting the admitted table — published 165.
+//
+// The number a resident sees when they ask how big the town is, and the
+// denominator under "the town reached 100 and paused arrivals". Two numbers
+// that are both published and cannot both be right, with nothing on either
+// surface saying which. It is the SECOND time this exact off-by-one landed:
+// `TEMPLATE` was the first, and the fix then was to add a name to the list —
+// which is why this one does not add `_archived` to anything.
+//
+// So the count is DERIVED, from `residentList` — the same reader the roster
+// door's own `town_total` comes from. There is now one roster (the admitted
+// table), one predicate over it (`isResidentHandle`, the door's admission
+// grammar), and three doors reading it. A count that cannot be derived from the
+// rows it claims to count is a claim nobody can check.
+//
+// ⚑ WHY NOT FIX THE STAMP INSTEAD, which is the other half of the choice. A
+// snapshot corrected at hydration is right only from the next rehydrate — and
+// it would leave two counters in the office, agreeing only for as long as
+// somebody keeps their predicates in step. That is the arrangement that has now
+// produced this bug twice. The other counts in `hydrated_counts` are left
+// exactly as they are: they are not what this issue is about, and widening the
+// derivation to them is a change nobody has asked for.
 export function townSummary(db, meta) {
   const all = db.prepare("SELECT handle, json FROM residents").all()
     .filter((r) => isOffice(JSON.parse(r.json))).map((r) => r.handle).sort();
   const offices = all.slice(0, TOWN_OFFICES_CAP);
   const complete = offices.length === all.length;
-  return { as_of: meta.as_of, counts: JSON.parse(meta.hydrated_counts ?? "{}"),
+  return { as_of: meta.as_of,
+    counts: { ...JSON.parse(meta.hydrated_counts ?? "{}"), residents: residentList(db).length },
     offices,
     offices_total: all.length,
     offices_shown: offices.length,
