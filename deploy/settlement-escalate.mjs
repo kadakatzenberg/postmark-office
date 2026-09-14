@@ -12,6 +12,26 @@
 //     write is landing on every single pass, which is contention and not a
 //     transient.
 //
+// ── AND A THIRD, WHICH WAS TERMINAL ALL ALONG AND WAITED ANYWAY (#2793) ─────
+//
+// A RED GRAMMAR SUITE. It meets this file's own definition of terminal word for
+// word — nothing the box can do clears it, and the next crossing composes the
+// same red — and until 2026-09-14 it escalated only through `recurring-refusal`,
+// i.e. on the THIRD unsettled crossing in a row, which is a day and a half.
+//
+// Measured: 2026-09-14 05:45Z, the S70 crossing refused "grammar suite red and
+// the isolation pass could not attribute it to a mark this crossing carried — a
+// finding for the keeper, not a retry". That run's journal carries the refusal
+// and nothing else: no `[settlement-escalate]` line, no issue, no ping. The
+// operator round found it at 12:35Z. Seven hours, and the fix was waiting on a
+// person who had not been told.
+//
+// So `suite-red` files on the FIRST occurrence, and it carries the two things a
+// person needs before they can act: the suite's own `not ok` lines, and what the
+// isolation pass did. The recurring threshold is untouched for every other
+// refusal shape — three-in-a-row is still what makes an individually-rerunnable
+// refusal terminal, and this class was never that.
+//
 // Both used to end as a red unit and a journal line at, in the real case,
 // 02:39:26Z. `systemctl --failed` carries it; the roll-call carries it the next
 // time somebody runs the operator round; nothing carries it TO anyone. The box
@@ -54,6 +74,8 @@
 //
 // Usage:
 //   node deploy/settlement-escalate.mjs --class canon-bad --receipt /srv/postmark-harbor/settlement-auto.json
+//   node deploy/settlement-escalate.mjs --class suite-red --receipt <path> \
+//        --suite-log <path> --isolate unattributable|not-run
 //   … --dry-run     compose and print the exact request, send nothing
 // Exit: always 0.
 
@@ -78,11 +100,80 @@ export function tokenFrom(text) {
 }
 
 /**
+ * IS THIS RECEIPT ACTUALLY A SUITE-RED REFUSAL. The gate on the new class, and
+ * it exists because `--class` is an argument: a caller that passed the word over
+ * the wrong receipt — a stale `settlement-auto.json` from the last crossing that
+ * PUBLISHED, a half-written one, a hand-typed rerun of the escalator — would
+ * file an issue about a red that is not there, and a queue that cries wolf is
+ * the silence this file replaces wearing a louder coat.
+ *
+ * TWO CONDITIONS, AND THE SECOND IS A DELIBERATE COUPLING. The status must be
+ * `refused`, and the receipt's own words must name the grammar suite. Those
+ * words are written at exactly two places in `settlement-auto.sh` — the
+ * UNATTRIBUTABLE exit and the isolate-off exit — and the falsifier quotes both
+ * verbatim, so rewording a refusal reddens this rather than quietly turning the
+ * escalation off.
+ */
+export const SUITE_RED_CAUSE = /grammar suite red/i;
+
+export function isSuiteRedRefusal(receipt) {
+  if (receipt?.status !== "refused") return false;
+  return SUITE_RED_CAUSE.test(`${receipt?.detail ?? ""}\n${receipt?.refusal?.cause ?? ""}`);
+}
+
+/**
+ * The suite's own reds, out of its log. NOT a summary and not a tail: the `not
+ * ok` lines are the only part of a 40,000-line runner log that says which law or
+ * which record broke, and they are what the journal already shouts at the same
+ * two exits (`grep -E "^not ok"`).
+ *
+ * CAPPED, and the cap SAYS SO. A suite that goes red in the fixtures can produce
+ * hundreds; an issue body has a size limit and a reader has a smaller one. What
+ * must never happen is a silent truncation — a count that stops at forty reads
+ * as forty reds, and the denominator is the thing an operator is judging.
+ */
+export function notOkLines(text, { max = 40 } = {}) {
+  const all = String(text ?? "").split(/\r?\n/).filter((l) => /^not ok\b/.test(l));
+  if (all.length <= max) return all;
+  return [...all.slice(0, max),
+    `… and ${all.length - max} more \`not ok\` line(s) — ${all.length} in total. The whole log is `
+    + "`settlement-last-suite.log` in the office tree on the box."];
+}
+
+/**
+ * WHAT THE ISOLATION PASS DID, in words, from a word the CALLER passes.
+ *
+ * It is not inferred here, and that is the point. The two exits reach this file
+ * from different states — the isolator ran and could attribute nothing, or it
+ * was switched off and never ran — and the receipt is `isolated: null` for both,
+ * because a pass that attributed nothing writes no isolate report. The shell is
+ * the only thing that knows which happened, so the shell says, and a word this
+ * map does not carry is reported as NOT SAID rather than guessed. An instrument
+ * that names the wrong subject is worse than one that says it does not know.
+ */
+const ISOLATE_VERDICT = {
+  unattributable:
+    "IT RAN AND ATTRIBUTED NOTHING. The isolator bisected the marks this crossing carried and could not find a "
+    + "subset whose removal turns the suite green, so the red is not any one mark's — it is the law's, the "
+    + "record's, or the machinery's. Nothing is quarantined and the whole town is held.",
+  "not-run":
+    "IT DID NOT RUN — this crossing was started with `SETTLEMENT_ISOLATE=0`, so nothing tried to attribute the "
+    + "red to a mark. If the red might belong to one mark rather than to the law, rerun with the isolator on "
+    + "before repairing anything: it is the cheaper answer and it lets the rest of the town settle.",
+};
+
+export function isolateVerdict(word) {
+  return ISOLATE_VERDICT[word]
+    ?? "NOT SAID. This escalation was filed without naming what the isolation pass did, which is a gap in the "
+       + "caller rather than a verdict — read the unit's journal for the isolator's own narration.";
+}
+
+/**
  * The issue body: the whole refusal, quoted, plus the sentence that says what
  * to do with it. The receipt goes in verbatim — a summary of a refusal is how
  * an operator ends up debugging the summary.
  */
-export function bodyFor(klass, receipt, { at = new Date().toISOString() } = {}) {
+export function bodyFor(klass, receipt, { at = new Date().toISOString(), suiteLog = null, isolate = null } = {}) {
   // TWO CLASSES SPEAK OVER THE RECEIPT'S OWN next_step, because for those two
   // the per-crossing advice has stopped being true and repeating it is what
   // wasted the three days this exists to end.
@@ -98,6 +189,15 @@ export function bodyFor(klass, receipt, { at = new Date().toISOString() } = {}) 
       + "refusal returned every crossing from 08-28 to 08-30 and was cleared only by a hand repairing the "
       + "drawer. Read the last crossing's own next_step below for what it named, then look for what keeps "
       + "re-proposing it rather than repairing the instance again.",
+    "suite-red":
+      "THE FIRST OCCURRENCE IS THE ESCALATION (#2793), and that is what changed on 2026-09-14. A red grammar "
+      + "suite is terminal by this file's own definition — nothing the box can do clears it, the next crossing "
+      + "composes the same red, and the town publishes NOTHING until a person edits either the law or the "
+      + "record. Read the `not ok` lines below, decide which of the two they name, and repair it. Then finish "
+      + "the crossing by hand rather than waiting for the clock: `sudo systemctl start "
+      + "postmark-settlement-by-hand.service` (#2786) takes the newest window that is still unfolded. Until "
+      + "this class existed a suite red reached a person only through `recurring-refusal`, on the THIRD "
+      + "unsettled crossing — a day and a half — and the 05:45Z S70 refusal sat unread for seven hours.",
   };
   const nextStep = OVERRIDE[klass] ?? receipt?.next_step ?? "read the refusal below and decide the removal lane.";
 
@@ -108,6 +208,26 @@ export function bodyFor(klass, receipt, { at = new Date().toISOString() } = {}) 
     "",
     nextStep,
     "",
+  ];
+
+  // THE TWO THINGS A PERSON NEEDS BEFORE THEY CAN ACT ON A SUITE RED, and they
+  // are above the receipt rather than inside it: the receipt says the suite was
+  // red, and every question after that ("red at what?", "is it one mark's?") is
+  // answered by these and by nothing else on the page.
+  if (klass === "suite-red") {
+    const reds = notOkLines(suiteLog);
+    lines.push("### The suite's own reds", "");
+    if (reds.length) lines.push("```", ...reds, "```");
+    else if (suiteLog == null)
+      lines.push("The suite log could not be read at escalation time. It is `settlement-last-suite.log` in the "
+        + "office tree on the box — the crossing copies it there before it exits.");
+    else
+      lines.push("The suite log carries NO `not ok` line. The gate failed without naming a test, and that is "
+        + "itself the finding: a crash, an out-of-memory, a runner that never started. Read the log's tail.");
+    lines.push("", "### The isolation pass", "", isolateVerdict(isolate), "");
+  }
+
+  lines.push(
     "### The refusal, verbatim",
     "",
     "```json",
@@ -119,7 +239,7 @@ export function bodyFor(klass, receipt, { at = new Date().toISOString() } = {}) 
     "Filed by `deploy/settlement-escalate.mjs` on the box. This issue is UPDATED, never duplicated:",
     "every further crossing that refuses with this class comments here. Close it when the record is",
     "repaired — the next crossing files a fresh one if the fault returns.",
-  ];
+  );
   return lines.join("\n");
 }
 
@@ -153,9 +273,23 @@ export async function findOpen(title, { token, repo }) {
   return null;
 }
 
-export async function escalate({ klass, receipt, token, repo, dryRun = false, log = console.error }) {
+export async function escalate({
+  klass, receipt, token, repo, dryRun = false, log = console.error, suiteLog = null, isolate = null,
+}) {
   const title = titleFor(klass);
-  const body = bodyFor(klass, receipt);
+
+  // THE GATE COMES BEFORE THE BODY, not after it. A wrong-receipt escalation
+  // that composed its body first would print the whole invented issue into the
+  // journal on the no-credential path, which is the same false alarm reaching a
+  // person by the other road.
+  if (klass === "suite-red" && !isSuiteRedRefusal(receipt)) {
+    log("[settlement-escalate] NOT FILED — `--class suite-red` was asked over a receipt that is not a suite-red "
+      + `refusal (status ${JSON.stringify(receipt?.status ?? null)}). Nothing was filed: an issue about a red `
+      + "that is not there teaches the queue to be ignored, which is the silence this file exists to end.");
+    return { filed: false, reason: "not-a-suite-red-refusal", title };
+  }
+
+  const body = bodyFor(klass, receipt, { suiteLog, isolate });
 
   if (!token) {
     log(`[settlement-escalate] ISSUE-WANTED — no usable GitHub credential, so this terminal refusal reaches nobody.`);
@@ -208,14 +342,25 @@ export async function run() {
   const credPath = argOf("credentials", DEFAULT_CRED);
   const receiptPath = argOf("receipt");
 
+  const suiteLogPath = argOf("suite-log");
+  const isolate = argOf("isolate");
+
   let receipt = null;
   try { receipt = receiptPath ? JSON.parse(readFileSync(receiptPath, "utf8")) : null; } catch { receipt = null; }
+
+  // `null` and `""` are different facts and the body says them differently: a
+  // log that could not be read is a missing instrument, a log that read empty is
+  // a suite that named no test. Only an unreadable path becomes null.
+  let suiteLog = null;
+  try { suiteLog = suiteLogPath ? readFileSync(suiteLogPath, "utf8") : null; } catch { suiteLog = null; }
 
   let token = null;
   try { token = existsSync(credPath) ? tokenFrom(readFileSync(credPath, "utf8")) : null; } catch { token = null; }
 
   try {
-    await escalate({ klass, receipt, token, repo, dryRun: process.argv.includes("--dry-run") });
+    await escalate({
+      klass, receipt, token, repo, suiteLog, isolate, dryRun: process.argv.includes("--dry-run"),
+    });
   } catch (err) {
     // Network down, DNS gone, GitHub throwing 502s. The refusal still happened
     // and the crossing still exited on it; this line is the whole cost.

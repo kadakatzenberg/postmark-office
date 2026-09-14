@@ -974,12 +974,28 @@ if ! (cd "$SWEEP" && TMPDIR="$SUITE_TMP" TMP="$SUITE_TMP" TEMP="$SUITE_TMP" npm 
       report refused "grammar suite red and the isolation pass could not attribute it to a mark this crossing carried — a finding for the keeper, not a retry"
       echo "[settlement-auto] SUITE RED, UNATTRIBUTABLE — publishing nothing" >&2
       grep -E "^not ok" "$WORK/suite.log" >&2 || tail -40 "$WORK/suite.log" >&2
+      # ── AND IT REACHES A PERSON ON THE FIRST OCCURRENCE (#2793) ────────────
+      # This exit is terminal by settlement-escalate.mjs's own definition and used
+      # to escalate only through `recurring-refusal`, on the third unsettled
+      # crossing — a day and a half. On 2026-09-14 the 05:45Z refusal reached
+      # nobody until the 12:35Z operator round found it. `|| true` like every
+      # other escalation: a crossing is never failed by its own alarm, and the
+      # refusal above is already the finding.
+      node "$OFFICE/deploy/settlement-escalate.mjs" --class suite-red --receipt "$OUT" \
+        --suite-log "$WORK/suite.log" --isolate unattributable >&2 || true
       exit 1
     fi
   else
     report refused "grammar suite red — a finding for the keeper, not a retry"
     echo "[settlement-auto] SUITE RED — publishing nothing" >&2
     grep -E "^not ok" "$WORK/suite.log" >&2 || tail -40 "$WORK/suite.log" >&2
+    # The same first-occurrence escalation (#2793). `--isolate not-run` rather
+    # than `unattributable`: this crossing was started with SETTLEMENT_ISOLATE=0,
+    # so nothing tried to attribute the red to a mark, and the two states are
+    # `isolated: null` on the receipt alike. The caller is the only thing that
+    # knows which, so the caller says it.
+    node "$OFFICE/deploy/settlement-escalate.mjs" --class suite-red --receipt "$OUT" \
+      --suite-log "$WORK/suite.log" --isolate not-run >&2 || true
     exit 1
   fi
 fi
