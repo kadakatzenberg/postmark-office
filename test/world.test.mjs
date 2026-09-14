@@ -373,6 +373,13 @@ test("overhang: a claim left where you stand, nesting one level out, is disclose
     "the reporter's own suggested sentence, verbatim");
   assert.match(r.why, /a claim is a rect/, "and it names the cause, not just the fact");
   assert.match(r.remedy, /mode: "center"/, "the remedy is the walk variant that lands with it");
+  // 2026-09-14 (Keith, postmark#2692): the remedy used to describe a second
+  // attempt only. A draft can move; a published mark cannot; and the preview
+  // says where a mark would nest before anything is written. All three, or a
+  // newcomer reads "move it" and finds the door closed.
+  assert.match(r.remedy, /amend: true/, "the remedy says a draft can still move, and how");
+  assert.match(r.remedy, /a published mark cannot move/, "…and that a published one cannot");
+  assert.match(r.remedy, /preview: true/, "…and names the preview for next time");
 });
 
 test("overhang: the ordinary case says nothing at all", async () => {

@@ -2463,8 +2463,28 @@ async function journalLeaveMark(clean, { crossing = currentCrossing() } = {}) {
       ? `a commons mark publishes only with escrow behind it — ✦0 leaves it standing as your private draft. It stands on ground that is not your household's, so stake at least ✦1 to put it forward; on your own ground ✦0 would have been enough.`
       : null;
 
-    const { amend, household, stamps: _st, ...rest } = clean;
+    const { amend, household, stamps: _st, preview: _pv, ...rest } = clean;
     const declaration = { ...rest, ...(staking ? { stamps: stakeN } : {}), ...(putForward ? { put_forward: true } : {}) };
+    // ── PREVIEW (founder-ruled 2026-09-14, postmark#2692): SAY IT, WRITE NOTHING.
+    // Every guard above has run and the verdict is computed; what a real leave
+    // would do from here is stamp the witness line, append the row and hand the
+    // drain a claim. A preview stops here and answers with the one fact no door
+    // said before the write: where the mark would NEST, by the fold's own
+    // containment rule over the same world the guards read (canon plus this
+    // household's live drafts). The door's disclosures downstream (overhang, the
+    // publish note) run on this answer exactly as they run on a written one.
+    if (clean.preview === true) {
+      const parent = await previewParent({ ...declaration, id }, [...canon.marks, ...live]);
+      const landing = pathFor({ ...declaration, id }, { publishedPathOf: filedPathOfAt(WORLD_CLONE, String(mainRef(WORLD_CLONE))) });
+      return {
+        preview: true, id, kind: clean.kind, parent, would: amending ? "amend" : "leave",
+        at: clean.at ?? null, extent: clean.extent ?? null,
+        dir: String(landing).replace(/^WORLD[/]marks[/]/, "").replace(/[/]mark[.]md$/, ""),
+        branch: draftBranch(household), put_forward: putForward,
+        ...(amending ? { amended: true, moved: false, _verdict: verdict } : {}),
+        nothing_written: "a preview: no draft, no journal row, no stake — leave the mark without preview: true to write it",
+      };
+    }
 
     const { at, witnesses } = await witnessStamp(clean.by);
     const entry = {
@@ -2767,6 +2787,7 @@ export async function leaveMarkViaOffice(worldClone, payload = {}, key = null) {
       : { class: klass };
   const clean = { slug, kind, at, extent, points, body: String(body).trim(), slot, value, parent_id, by, household, date: new Date().toISOString(),
     ...classFields, ...(image !== undefined ? { image } : {}), ...(payload.amend === true ? { amend: true } : {}),
+    ...(payload.preview === true ? { preview: true } : {}),
     // `stamps` now RIDES the declaration instead of being stripped here. It was
     // stripped because 1.0 routes escrow through the stake verb and the record
     // had no use for it — but under the stake-is-the-boundary ruling the amount
@@ -2808,7 +2829,7 @@ export async function leaveMarkViaOffice(worldClone, payload = {}, key = null) {
   // charging for a publication that did not happen. And ✦0 on your own ground is
   // a real putting-forward with nothing to move: the promotion already happened
   // in the docket pen, and there is no escrow row for zero stamps.
-  if (stakeN >= 1 && result?.put_forward === true) {
+  if (stakeN >= 1 && result?.put_forward === true && result?.preview !== true) {
     const staked = await callWorldStakeTool("world_stake", { mark: result.id, stamps: stakeN, handle: by }, key);
     if (staked?.error) {
       result.stake_bounce = { defect: staked.defect, hint: staked.hint };
@@ -2937,7 +2958,7 @@ export function overhangOf({ id, kind, parent, at, extent, standing, spine }) {
       ? `nested in ${parent} — your claim overhangs ${standIn.id}, which you are standing in`
       : `nested at the root of the world — your claim overhangs ${standIn.id}, which you are standing in`,
     why: `a claim is a rect, and yours straddles ${standIn.id}'s boundary, so it is not ≥99% inside it — walking to a mark stops you ON its edge, which is where this comes from`,
-    remedy: `to sit inside ${standIn.id}: world_walk mark_id: "${standIn.id}", mode: "center" — then leave the mark from there`,
+    remedy: `to sit inside ${standIn.id}: world_walk mark_id: "${standIn.id}", mode: "center" — then leave the mark from there. While it is still a draft it can move: leave it again with amend: true and the new at (a published mark cannot move). Next time, preview: true says where a mark would nest before anything is written`,
   };
 }
 
@@ -3014,6 +3035,20 @@ async function disclosePublishing(result, by) {
     if (!note) return;
     result.publishing = note;
   } catch { /* the note is a courtesy — the mark already stands */ }
+}
+
+// WHERE A MARK WOULD NEST — the fold's own rule, never a second one (2026-09-14).
+// `containmentParentOf` is the engine's per-mark answer (the ≥99% coverage rule,
+// innermost wins); an older engine exports only `placementParent`, the same rule
+// without the root fallback; an engine with neither answers null rather than
+// guessing. The candidate is judged against the list the guards read, plus
+// itself, so a draft the author already left is a parent it can nest in.
+async function previewParent(candidate, marks) {
+  const engine = await foldConstants();
+  const all = [...(marks ?? []).filter((m) => m?.id !== candidate.id), candidate];
+  if (typeof engine.containmentParentOf === "function") return engine.containmentParentOf(candidate, all) ?? null;
+  if (typeof engine.placementParent === "function") return engine.placementParent(candidate, all) ?? engine.worldRootOf?.(all)?.id ?? null;
+  return null;
 }
 
 async function discloseOverhang(result, by, key = null) {
@@ -4062,6 +4097,7 @@ export const WORLD_TOOLS = [
       status: { type: "string", enum: ["open", "done"], description: "bounty only: open (default) or done — a done notice stays on the board, struck" },
       image: { type: "string", description: "optional: one image URL on the town's media host (https://media.postmark.town/…) — upload the file first with upload_media (or POST /media) and pass the url it returns; other hosts bounce" },
       stamps: { type: "number", description: "stake this many of your ✦ on the new mark in the same act — AND THAT IS WHAT PUBLISHES IT. Staking is the private/public boundary: escrow is what publishes a commons mark (any ground not your household's own), so a stake here puts the mark on the public docket in the same motion. OMIT IT and the mark is a TRULY PRIVATE DRAFT — held where only your household's key reaches it, on no docket, in no export, in no archive, and not yet a line in the world's log; leave the same slug again to rewrite it, world_stake to put it forward later, world_withdraw_mark to let it go. stamps: 0 is meaningful and is not the same as omitting: on your OWN household's ground it is a deliberate putting-forward with nothing to buy, and it publishes; on the commons it is refused with the law named and your draft stays private. Whole stamps; they stay yours — world_unstake returns them." },
+      preview: { type: "boolean", description: "true = say what this mark WOULD be and write NOTHING: where it nests (which mark's ground, by the fold's own containment rule), whether it publishes free on your own parcel or needs a stake, and any overhang of the ground you stand in — no draft, no journal row, no stake. Read it, then leave the mark for real without preview." },
       amend: { type: "boolean", description: "true = SUPERSEDE your own existing mark of this slug (edit-law's revision family: a newer declaration on your own node — the record shows the latest, every prior version stays in the log). Without it, a reused slug bounces. In-place amends always work; an amend that MOVES a published mark is refused for now (#1862)." },
     }, required: ["slug", "kind", "body"], additionalProperties: false } },
   { name: "world_note",
