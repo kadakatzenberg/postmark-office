@@ -150,17 +150,111 @@ test("THE RELATION: given n ≥ 1 and no promotion, a bounce appears for exactly
 
 // ── (e) THE LAWS THIS RESTS ON, QUOTED FROM THEIR OWN FILES ──────────────────
 
-test("the promotion still runs BEFORE the ledger — the whole ordering guard depends on it", () => {
-  const door = src("world-stake.mjs");
-  const promote = door.indexOf("promoteDraftOnStake({");
-  const gate = door.indexOf("const refusal = stakeRefusalFor(");
-  const ledger = door.indexOf('runExec({ verb: "stake"');
-  assert.ok(promote > 0 && gate > 0 && ledger > 0, "the three steps are no longer all present");
-  assert.ok(promote < gate, "the promotion no longer precedes the refusal gate");
-  assert.ok(gate < ledger, "the refusal gate no longer precedes the ledger's debit — a refusal could charge again");
-});
+// The ordering was pinned here by reading the door's source, which survived a
+// rename of the very calls it named and told us nothing about what runs first.
+// It is a BEHAVIOUR, so it is watched as one: see § (f) below, where the door is
+// driven and the two steps record the order they actually ran in.
 
 test("the stake pen still names its standing reason when it releases a held deed", () => {
   assert.match(src("world2-claims.mjs"), /lateArrival: LATE_ARRIVAL_PUT_FORWARD/,
     "promoteDraftOnStake no longer declares the late arrival — a slept-on draft would refuse again");
+});
+
+// ── (f) THE DOOR ITSELF — the one line that stops the charge ─────────────────
+//
+// ADDED ON REVIEW, and the review is the point. The section above unit-tests
+// `stakeRefusalFor` and pins the door's ordering by reading its source, and
+// both passed while the reviewer's flip — the catch's class name changed to one
+// that never arrives — put Sophia's debit straight back. Twelve green tests over
+// a door that charged her anyway. Nothing here drove `worldStakeViaOffice` with
+// a pen that refuses, so the `catch` that tells a refusal from an outage was
+// never executed by this suite at all.
+//
+// THE ASSERTION THAT WAS MISSING IS AN ABSENCE: the ledger is NEVER CALLED. A
+// bounce coming back is not enough — the old code could have charged her and
+// then bounced. So the ledger is a spy and the test reads its call count, which
+// is the only way "she was not charged" is a fact a test can hold.
+
+import { worldStakeViaOffice } from "../src/world-stake.mjs";
+
+const KEY = { handles: new Set(["sophia-familiaris"]), household: "kadakatzenberg" };
+const MARK = "sophia-familiaris/the-familiar-house";
+
+// The door with every collaborator answering, and the ledger counting. `promote`
+// is whatever the case under test needs it to be.
+function doorWith(promote) {
+  const charges = [];
+  const deps = {
+    exists: async () => ({ known: true, exists: true, record: null }),
+    standing: async () => ({ known: true, found: true, retired: false }),
+    promote,
+    ledger: async (payload) => { charges.push(payload); return { applied: payload.n, staked: payload.n }; },
+  };
+  return { deps, charges };
+}
+
+test("A LAWFUL REFUSAL NEVER REACHES THE LEDGER: the pen refuses, the door bounces 409, no stamp moves", async () => {
+  const { deps, charges } = doorWith(async () => { throw new LateCrossingError(183, 185); });
+  const out = await worldStakeViaOffice({ mark: MARK, stamps: 1 }, KEY, deps);
+  assert.equal(charges.length, 0,
+    `THE RESIDENT WAS CHARGED for a claim that was never filed — the ledger ran ${charges.length} time(s) after a lawful refusal. This is postmark#2722 reopened.`);
+  assert.equal(out?.error, "bounce", "a refused promotion did not bounce");
+  assert.equal(out.code, 409);
+  assert.equal(out.held, 0);
+  assert.equal(out.requested, 1);
+});
+
+test("AN UNREACHABLE STORE STILL LETS THE LEDGER RUN — down and \"no\" are different facts, at the door too", async () => {
+  const { deps, charges } = doorWith(async () => { throw new Error("connect ECONNREFUSED 127.0.0.1:5432"); });
+  const out = await worldStakeViaOffice({ mark: MARK, stamps: 1 }, KEY, deps);
+  assert.equal(charges.length, 1, "a store outage swallowed the resident's stake — the old posture was not kept");
+  assert.equal(charges[0].verb, "stake");
+  assert.equal(charges[0].n, 1);
+  assert.equal(out?.error, undefined, "an outage turned into a bounce");
+});
+
+test("THE RELATION AT THE DOOR: the ledger runs exactly when the promotion did not lawfully refuse", async () => {
+  const cases = [
+    ["a lawful refusal", async () => { throw new LateCrossingError(183, 185); }, false],
+    ["a store outage", async () => { throw new Error("ECONNREFUSED"); }, true],
+    ["an ordinary stake on a standing mark", async () => ({ promoted: false, claim: null, window: 186, late_from: null }), true],
+    ["a promotion that went forward", async () => ({ promoted: true, claim: "c1", window: 186, late_from: null }), true],
+    ["a slept-on draft, filed late", async () => ({ promoted: true, claim: "c1", window: 185, late_from: 183 }), true],
+  ];
+  let charged = 0, spared = 0;
+  for (const [name, promote, shouldCharge] of cases) {
+    const { deps, charges } = doorWith(promote);
+    await worldStakeViaOffice({ mark: MARK, stamps: 1 }, KEY, deps);
+    assert.equal(charges.length > 0, shouldCharge, `${name}: the ledger ${charges.length > 0 ? "ran" : "did not run"} and should have ${shouldCharge ? "run" : "not run"}`);
+    shouldCharge ? charged++ : spared++;
+  }
+  assert.ok(charged > 0 && spared > 0, `one-sided matrix: ${charged} charged / ${spared} spared`);
+});
+
+test("a draft filed late is ANSWERED as such through the door, naming both windows", async () => {
+  const { deps } = doorWith(async () => ({ promoted: true, claim: "c1", window: 185, late_from: 183 }));
+  const out = await worldStakeViaOffice({ mark: MARK, stamps: 1 }, KEY, deps);
+  assert.equal(out.put_forward, true);
+  assert.equal(out.late_from_crossing, 183);
+  assert.match(out.effect, /183/); assert.match(out.effect, /185/);
+});
+
+test("an ordinary same-window promotion says nothing about a late arrival", async () => {
+  const { deps } = doorWith(async () => ({ promoted: true, claim: "c1", window: 186, late_from: null }));
+  const out = await worldStakeViaOffice({ mark: MARK, stamps: 1 }, KEY, deps);
+  assert.equal(out.put_forward, true);
+  assert.equal("late_from_crossing" in out, false, "a same-window promotion claimed to be a late arrival");
+});
+
+test("THE ORDER IS A BEHAVIOUR, not a line number: the promotion runs, then the ledger", async () => {
+  const order = [];
+  const deps = {
+    exists: async () => ({ known: true, exists: true, record: null }),
+    standing: async () => { order.push("standing"); return { known: true, found: true, retired: false }; },
+    promote: async () => { order.push("promote"); return { promoted: true, claim: "c1", window: 186, late_from: null }; },
+    ledger: async (p) => { order.push("ledger"); return { applied: p.n }; },
+  };
+  await worldStakeViaOffice({ mark: MARK, stamps: 1 }, KEY, deps);
+  assert.deepEqual(order, ["promote", "standing", "ledger"],
+    "the stake's steps ran out of order — a refusal is only knowable before the debit if the promotion precedes it");
 });
