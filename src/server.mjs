@@ -1189,6 +1189,39 @@ const server = createServer((req, res) => {
           .then((r) => (r?.error === "bounce" ? bounce(res, r.code ?? 422, r.defect, r.hint) : j(res, 200, r)))
           .catch((e) => bounce(res, 500, "the world door tripped", String(e?.message ?? e).slice(0, 200)));
       }
+      // GET /world/holdings — what the caller's own residents are carrying: the
+      // shadow of give/drop/take, over plain HTTP (curl parity, 2026-08-15).
+      //
+      // ⚑ IT LIVES HERE BECAUSE IT NEVER ANSWERED ANYWHERE ELSE (#2599). The
+      // handler sat in the write tier, 380 lines BELOW the GET catch-all, so
+      // every GET — anonymous and keyed alike — was answered by "no such door"
+      // while the manifest above advertised the route. A key made no difference,
+      // which was the tell that nothing was adjudicating the request at all.
+      //
+      // NOT keyless, unlike its neighbours, and the difference is the door's own
+      // contract rather than an oversight: `world_holdings` answers "what YOU are
+      // carrying — every thing whose live holding edge names one of YOUR
+      // residents". There is no such answer for a caller the office cannot name.
+      // So it keeps the refusal the write tier used to give it, by name and in
+      // its own words, rather than handing a stranger an empty pair of hands —
+      // "I read it and it is empty" is the one sentence a caller cannot tell
+      // apart from "I could not tell who you are".
+      if (path === "/world/holdings") {
+        if (!key)
+          return bounce(res, 401, "these are YOUR hands, and the office must know whose",
+            "send your household key as a Bearer token — your human mints one at https://postmark.town/join, or a rolled resident mints their own at POST /keys/claim");
+        (async () => {
+          try {
+            const handle = url.searchParams.get("handle") ?? undefined;
+            const result = await callHoldTool("world_holdings", handle ? { handle } : {}, key);
+            return j(res, 200, result);
+          } catch (e) {
+            if (e.code) return bounce(res, e.code, e.defect, e.hint);
+            return bounce(res, 500, "the office tripped", String(e?.message ?? e).slice(0, 200));
+          }
+        })();
+        return;
+      }
       // GET /world/conversations — every conversation in the world, live threads
       // first, closed ones still browsable. Keyless like the rest of the world's
       // read tier: speech is public the way street conversation is, and world_say
@@ -1557,7 +1590,15 @@ const server = createServer((req, res) => {
       // The door list names the apex only where the apex actually answers — a
       // 404 that advertises a route it would also 404 on is a lie in the shape
       // of help.
-      return bounce(res, 404, "no such door", `GET /town /residents[?limit=&offset=&since=&office=] /residents/{h} /mail/{h} /letters[?filters] /letters/{id} /doorstep/{h} /metrics/mail /repo/log[?path=&author=&since=&until=&limit=] /regions /regions/{slug} /homes/{h} /stamps /stamps/{h} /quests/{h} /world/settlements /world/store /world/dynamic /world/present /world/graph[?kinds=&types=] /world/graph.gexf[?view=static]${apexEnabled() ? " /world/apex?x=&y=" : ""} /votes /votes/{topic} /bulletin /fund/intake /search?q=`);
+      //
+      // By that same rule `/world/holdings` joins the list now that it answers
+      // (#2599). It was absent while the manifest above advertised it, so the
+      // office published two route lists and only this one was true; the fix
+      // made the route real, which is what earns it a place here. It asks for a
+      // key where its neighbours do not, and that is not a reason to hide it —
+      // this list says which doors EXIST, and a 401 that names itself is an
+      // answer. It is a lie only when the door is not there.
+      return bounce(res, 404, "no such door", `GET /town /residents[?limit=&offset=&since=&office=] /residents/{h} /mail/{h} /letters[?filters] /letters/{id} /doorstep/{h} /metrics/mail /repo/log[?path=&author=&since=&until=&limit=] /regions /regions/{slug} /homes/{h} /stamps /stamps/{h} /quests/{h} /world/settlements /world/store /world/dynamic /world/present /world/holdings /world/graph[?kinds=&types=] /world/graph.gexf[?view=static]${apexEnabled() ? " /world/apex?x=&y=" : ""} /votes /votes/{topic} /bulletin /fund/intake /search?q=`);
     }
 
     // Every act that reaches the write tier is counted by the channel it
@@ -1937,19 +1978,12 @@ const server = createServer((req, res) => {
       }).catch(() => bounce(res, 400, "could not read the body", "send a JSON object"));
       return;
     }
-    if (req.method === "GET" && path === "/world/holdings") {
-      (async () => {
-        try {
-          const handle = url.searchParams.get("handle") ?? undefined;
-          const result = await callHoldTool("world_holdings", handle ? { handle } : {}, key);
-          return j(res, 200, result);
-        } catch (e) {
-          if (e.code) return bounce(res, e.code, e.defect, e.hint);
-          return bounce(res, 500, "the office tripped", String(e?.message ?? e).slice(0, 200));
-        }
-      })();
-      return;
-    }
+    // ⚑ `GET /world/holdings` USED TO SIT HERE and could never be reached: this
+    // is the write tier, 380 lines below the GET catch-all, so every GET was
+    // answered by the 404 before it arrived (#2599). It now lives beside the
+    // other world reads, above that catch-all. A GET belongs in the read tier
+    // even when it wants a credential — the tier is about which door answers,
+    // not about who may pass through it.
 
     // POST /world/say — the say-box (Keemin, 2026-08-08): the SAME verb the MCP
     // door serves, exposed so the conversations page can carry it. Two shapes:
