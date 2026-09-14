@@ -151,6 +151,41 @@ export const apexEnabled = () => process.env.WORLD_APEX === "1";
 // A second copy of this wiring in world.mjs would be two answers to "how does
 // the office reach the threshold ledger" — the drift this repo keeps closing.
 // world.mjs imports it lazily, so the edge back to the apex is not a cycle.
+// ── THE FRAME TRAVELS WITH THE STANDPOINT (postmark#2712) ──────────────────
+//
+// What the crossing doors are told about where a resident is. It answered
+// `{ x, y, name }` and nothing else, which was enough for as long as every
+// threshold was measured against canonical geometry.
+//
+// It stopped being enough the moment a door could be aboard something that
+// moves. `enterViaOffice` composes a nested threshold into the carrier's live
+// frame before measuring reach (world-crossings.mjs § thresholdAtStandpointFrame,
+// kadakatzenberg's #2712 repair), and to do that it has to know there IS a
+// carrier, WHICH one, and where inside it the resident stands. Those three facts
+// exist on `residentStandpoint` — `aboard`, `frame`, `frame_offset` come off
+// `movementStandpoint`'s frame fold — and this projection was dropping all of
+// them on the floor. The composition was therefore unreachable through the real
+// door while passing its own tests, which is the worst of the two ways to be
+// wrong: a correct repair, inert.
+//
+// A NAMED PROJECTION rather than an object literal, so a falsifier can hand the
+// door exactly what the office hands it and the two cannot drift. The engine
+// reads only `x` and `y` off this object (world-verbs.mjs § pointWithinMark), so
+// the extra fields are inert everywhere that does not ask for them.
+export function standpointForCrossing(here, who) {
+  if (!here || !Number.isFinite(here.x)) return { x: 0, y: 0, name: who };
+  return {
+    x: here.x, y: here.y, name: who,
+    // Booleans rather than pass-through: `aboard` is a fact the door branches
+    // on, and `undefined` there reads as "ashore" by accident rather than by
+    // answer. The two ids stay null when absent, for the same reason.
+    aboard: here.aboard === true,
+    moving: here.moving === true,
+    frame: here.frame ?? null,
+    frame_offset: here.frame_offset ?? null,
+  };
+}
+
 export function crossingDeps() {
   return {
     world: async () => await worldStateRaw(),
@@ -161,10 +196,7 @@ export function crossingDeps() {
     // entered again was adjudicated as though he had never been inside.
     // src/enter-exit-ledger.mjs is the one deriver; this is one of its readers.
     ledger: async () => { try { return (await servedEnterExitLedger(WORLD_CLONE)).ledger; } catch { return ""; } },
-    standpointOf: async (who) => {
-      const here = await residentStandpoint(who).catch(() => null);
-      return here && Number.isFinite(here.x) ? { x: here.x, y: here.y, name: who } : { x: 0, y: 0, name: who };
-    },
+    standpointOf: async (who) => standpointForCrossing(await residentStandpoint(who).catch(() => null), who),
     // ENTERING ENDS THE WALK (Keemin-ruled 2026-09-12; postmark-town/postmark #2685).
     // `walking` is the ONE reader of "where is this resident" (residentStandpoint:
     // moving = the derived leg has not arrived); `stop` is the door's own walk act to

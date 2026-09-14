@@ -107,3 +107,49 @@ test("#2712 — a real refusal points at the child's live-frame coordinates", as
   assert.deepEqual(e.walk?.to, { x: 1150, y: 1000 }, "the remedy follows the carrier instead of sending the resident to the stale canonical mark");
   assert.match(e.hint ?? "", /\(1150, 1000\)/);
 });
+
+// ── THE WIRING, ADDED ON REVIEW (2026-09-13) ────────────────────────────────
+//
+// The three tests above prove the composition is right. They cannot prove the
+// office ever reaches it, because they hand the door a standpoint they build
+// themselves — and the office's own projection was answering `{ x, y, name }`
+// and dropping `aboard`, `frame` and `frame_offset` on the floor. So the repair
+// was correct and unreachable: `thresholdAtStandpointFrame` returned the target
+// untranslated on every real call and Sophia would still have been refused.
+//
+// `standpointForCrossing` is that projection, named so a test can hand the door
+// exactly what `crossingDeps` hands it. These two drive the same scenario
+// through it. Revert the projection to its three keys and both go red.
+
+import { standpointForCrossing } from "../src/world-apex.mjs";
+
+test("#2712 — the office's OWN standpoint projection carries the frame the door composes with", () => {
+  const projected = standpointForCrossing(
+    { x: 1800, y: 401, placed: true, aboard: true, moving: false, frame: SHIP_ID, frame_offset: { x: 0, y: 1 } }, WHO);
+  assert.equal(projected.aboard, true, "the door is not told the resident is aboard anything");
+  assert.equal(projected.frame, SHIP_ID, "the door is not told WHICH carrier");
+  assert.deepEqual(projected.frame_offset, { x: 0, y: 1 }, "the door is not told where inside it they stand");
+  assert.equal(projected.x, 1800); assert.equal(projected.y, 401);
+});
+
+test("#2712 — ashore, the projection says so plainly and the door composes nothing", () => {
+  const ashore = standpointForCrossing({ x: 5, y: 6, placed: true, moving: false }, WHO);
+  assert.equal(ashore.aboard, false, "an absent carrier must read as ashore by answer, not by undefined");
+  assert.equal(ashore.frame, null);
+  assert.equal(ashore.frame_offset, null);
+  // and an unplaced resident still lands at the origin, as before
+  assert.deepEqual(standpointForCrossing(null, WHO), { x: 0, y: 0, name: WHO });
+});
+
+test("#2712 — the entry succeeds through the OFFICE'S projection, not only through a hand-built standpoint", async (t) => {
+  const c = fakeLawClone(); t.after(c.cleanup);
+  const ship = { id: SHIP_ID, kind: "sited", at: { x: 0, y: 0 }, extent: { w: 10, h: 26 } };
+  const wheelhouse = { id: "the-town/the-wheelhouse", kind: "sited", at: { x: 0, y: 1 }, extent: { w: 4, h: 2 } };
+  const world = { marks: [ship, wheelhouse] };
+  const standpoint = { x: 1800, y: 401, placed: true, aboard: true, moving: false, frame: SHIP_ID, frame_offset: { x: 0, y: 1 } };
+  const d = deps(world, standpoint);
+  d.standpointOf = async () => standpointForCrossing(standpoint, WHO);   // the office's own words
+  const answer = await enterViaOffice(c.dir, { mark: wheelhouse.id, handle: WHO }, key, d);
+  assert.deepEqual(answer.entered, [wheelhouse.id],
+    "the door refused a resident standing at the door — the composition is unreachable through the office's own standpoint, which is #2712 still open");
+});
