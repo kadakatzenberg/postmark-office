@@ -1,20 +1,97 @@
-name: Claim ledger reproduction
+name: Claim ledger repair verification
 
 on:
   push:
     branches:
       - investigate/claim-ledger-flake
 
+permissions:
+  contents: write
+
 jobs:
-  reproduce:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: investigate/claim-ledger-flake
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Make claim-ledger own its listener ports
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("test/claim-ledger.test.mjs")
+          text = path.read_text()
+          old_marker = "const PORT = 43901;\nconst GH_PORT = 43902;\nconst BASE = `http://127.0.0.1:${PORT}`;"
+          new_marker = '''// Both listeners belong to this test process. Asking the kernel for their ports
+// means another lane can run the same file on the same box without becoming
+// shared state for this one.
+let BASE;'''
+
+          if old_marker in text:
+              text = text.replace(old_marker, new_marker, 1)
+              text = text.replace(
+                  'const url = new URL(req.url, `http://127.0.0.1:${GH_PORT}`);',
+                  'const url = new URL(req.url, "http://127.0.0.1");',
+                  1,
+              )
+              text = text.replace(
+                  '  await new Promise((ok) => ghServer.listen(GH_PORT, ok));',
+                  '''  let ghBase;
+  await new Promise((ok, no) => {
+    const fail = (error) => no(error);
+    ghServer.once("error", fail);
+    ghServer.listen(0, "127.0.0.1", () => {
+      ghServer.off("error", fail);
+      ghBase = `http://127.0.0.1:${ghServer.address().port}`;
+      ok();
+    });
+  });''',
+                  1,
+              )
+              text = text.replace(
+                  '  child = spawn(process.execPath, [join(ROOT, "src", "server.mjs"), "--port", String(PORT),',
+                  '  child = spawn(process.execPath, [join(ROOT, "src", "server.mjs"), "--port", "0",',
+                  1,
+              )
+              text = text.replace(
+                  '      GITHUB_AUTH_URL: `http://127.0.0.1:${GH_PORT}/login/oauth/authorize`,',
+                  '      GITHUB_AUTH_URL: `${ghBase}/login/oauth/authorize`,',
+                  1,
+              )
+              text = text.replace(
+                  '      GITHUB_TOKEN_URL: `http://127.0.0.1:${GH_PORT}/login/oauth/access_token`,',
+                  '      GITHUB_TOKEN_URL: `${ghBase}/login/oauth/access_token`,',
+                  1,
+              )
+              text = text.replace(
+                  '      GITHUB_API_URL: `http://127.0.0.1:${GH_PORT}`,',
+                  '      GITHUB_API_URL: ghBase,',
+                  1,
+              )
+              text = text.replace(
+                  '  await awaitListening(child);',
+                  '''  let officePort = null;
+  child.stdout.on("data", (data) => {
+    const match = /listening on :(\\d+)/.exec(String(data));
+    if (match) officePort = Number(match[1]);
+  });
+  await awaitListening(child);
+  assert.ok(officePort, "the office announces its kernel-assigned port");
+  BASE = `http://127.0.0.1:${officePort}`;''',
+                  1,
+              )
+              path.write_text(text)
+          elif new_marker not in text:
+              raise SystemExit("claim-ledger port seam is neither original nor repaired")
+          PY
+          git diff --check
       - name: Run claim ledger ten times serially
         shell: bash
         run: |
@@ -54,17 +131,29 @@ jobs:
           if [ "$code_b" -ne 0 ]; then concurrent_failures=$((concurrent_failures + 1)); fi
           echo "concurrent_failed_runs=$concurrent_failures" | tee -a claim-ledger-summary.txt
           echo "$concurrent_failures" > claim-ledger-concurrent-failures.txt
-      - name: Upload reproduction evidence
+      - name: Upload verification evidence
         uses: actions/upload-artifact@v4
         with:
-          name: claim-ledger-reproduction
+          name: claim-ledger-owned-ports
           path: |
             claim-ledger-summary.txt
             claim-ledger-serial-failures.txt
             claim-ledger-concurrent-failures.txt
             claim-ledger-*.txt
-      - name: Require clean serial runs and a concurrent collision
+      - name: Require clean serial and concurrent runs
         shell: bash
         run: |
           test "$(cat claim-ledger-serial-failures.txt)" -eq 0
-          test "$(cat claim-ledger-concurrent-failures.txt)" -ge 1
+          test "$(cat claim-ledger-concurrent-failures.txt)" -eq 0
+      - name: Commit verified repair
+        shell: bash
+        run: |
+          if git diff --quiet -- test/claim-ledger.test.mjs; then
+            echo "source already committed"
+            exit 0
+          fi
+          git config user.name "kadakatzenberg"
+          git config user.email "131329396+kadakatzenberg@users.noreply.github.com"
+          git add test/claim-ledger.test.mjs
+          git commit -m "test: let claim-ledger own its listener ports"
+          git push origin HEAD:investigate/claim-ledger-flake
