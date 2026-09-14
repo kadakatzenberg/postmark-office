@@ -3018,6 +3018,31 @@ async function sitedWithin(parcel, marks) {
     && holds(m));
 }
 
+// ── DEC-5, THE WALK GUARD — THE OCCUPANCY READ, LIFTED SO IT CAN BE DRIVEN ──
+//
+// (postmark#2690's falsifier, 2026-09-13. The FIX in here is kadakatzenberg's
+// and is one line: `deps.now()`. Only its location moved.)
+//
+// `deps.now()` is fractional ferry crossings — the same clock the enter/exit
+// door stamps a passage with. The guard used to ask in UNIX HALF-DAYS instead
+// (the epoch millisecond count over a half-day in milliseconds), a number some
+// forty thousand crossings in the future, so an `enter_on_arrival` row
+// scheduled for the NEXT crossing compared as long past and folded into
+// occupancy before the resident had arrived: a walk refused because of a
+// threshold nobody had crossed yet. The removed expression is deliberately not
+// written out here — the author's falsifier greps this file for it.
+//
+// It is a function rather than four lines inside the guard because a one-line
+// clock repair that no test can execute is a repair that can be undone in
+// silence — the reviewer's lesson from the stake door the same night. Driven
+// with a ledger and a clock, this answers "what is this resident within, now",
+// and a falsifier can hand it a row from the future and watch it stay out.
+export async function occupiedNowBy(who, thresholds, deps) {
+  const atNow = thresholds.stampAt(deps.now());
+  const acts = thresholds.parseEnterExitLedger(await deps.ledger()).acts;
+  return [...(thresholds.occupancyAt(acts, atNow).get(who) ?? [])];
+}
+
 export async function walkViaOffice(worldClone, payload = {}, key = null) {
   { const fz = worldFreezeBounce(); if (fz) return fz; }
   const bounce = (code, defect, hint, extra = {}) => {
@@ -3364,9 +3389,9 @@ export async function walkViaOffice(worldClone, payload = {}, key = null) {
     const law = await crossingLaw(worldClone).catch(() => null);
     if (law?.thresholds && typeof law.verbs?.pointWithinMark === "function") {
       const deps = crossingDeps();
-      const atNow = law.thresholds.stampAt(deps.now());
-      const acts = law.thresholds.parseEnterExitLedger(await deps.ledger()).acts;
-      const stack = [...(law.thresholds.occupancyAt(acts, atNow).get(who) ?? [])];
+      // The clock, the ledger and the fold — § DEC-5, THE WALK GUARD — THE
+      // OCCUPANCY READ, above this function, where a test can drive them.
+      const stack = await occupiedNowBy(who, law.thresholds, deps);
       // pointWithinMark takes the MARK OBJECT (world-verbs.mjs:92), resolved from
       // the same world the enter door adjudicates against (deps.world().marks).
       const w = stack.length ? await deps.world() : null;
