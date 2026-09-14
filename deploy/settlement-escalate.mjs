@@ -339,7 +339,18 @@ function argOf(name, fallback = null) {
 export async function run() {
   const klass = argOf("class", "unclassified");
   const repo = argOf("repo", process.env.POSTMARK_TOWN_REPO || DEFAULT_REPO);
-  const credPath = argOf("credentials", DEFAULT_CRED);
+  // `SETTLEMENT_ESCALATE_CRED` exists so the WIRING can be falsified without a
+  // network. `test/settlement-suite-red-escalates.test.mjs` runs the real
+  // settlement-auto.sh to its suite-red exit and reads the escalator's own
+  // ISSUE-WANTED line as the proof that the call site fired — and that line only
+  // appears when no credential is found. Without this override the test would
+  // pass on a laptop and POST TO GITHUB on the box, where
+  // `/srv/postmark-office/.git-credentials` is exactly where it is expected to
+  // be. A probe whose answer depends on where it is run is not a probe.
+  //
+  // `--credentials` still wins, and an unset env is the default it has always
+  // been, so nothing about the box's own path changes.
+  const credPath = argOf("credentials", process.env.SETTLEMENT_ESCALATE_CRED || DEFAULT_CRED);
   const receiptPath = argOf("receipt");
 
   const suiteLogPath = argOf("suite-log");
