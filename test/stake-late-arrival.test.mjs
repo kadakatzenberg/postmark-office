@@ -1,0 +1,166 @@
+// stake-late-arrival.test.mjs — a draft that outlived its window can still be
+// put forward, and a refused promotion never debits.
+//
+// THE DEFECT (postmark#2722, hotfix w38). A private draft is a claims row in
+// the window it was composed in, and the deed it is holding carries that same
+// crossing. When a resident slept on a draft and then staked it, the stake pen
+// released the held deed into the pen — which refused, correctly on its own
+// terms, because a certified window may not be rewritten:
+//
+//     a row for crossing 183 may not enter the record while the open window is
+//     185: that window is certified history and the notary refuses to rewrite
+//     it (the act-4171 class). A late arrival files into the window it ARRIVES
+//     in — set W2_LATE_ARRIVAL="<reason>" and the pen stamps 185, keeping the
+//     original crossing on the payload.
+//
+// The promotion's whole transaction rolled back; the stake door's catch logged
+// it; and the LEDGER ran anyway. Sophia's books read ✦1 staked while every mark
+// surface read a zero-backed draft. She hit it twice, 2026-09-12 18:24:29Z and
+// 18:25:24Z; Deva's 03:35Z 09-13 stake hit the identical line at 184/186.
+//
+// THE REPAIR IS THE GUARD'S OWN REMEDY, made reachable by a caller instead of
+// only by a process-wide environment variable: the stake pen names its standing
+// reason, the deed files into the window it ARRIVES in with the composing
+// crossing kept on its payload, and the promotion proceeds. Nothing rewrites
+// certified history. The claim row needed no remedy at all — 007's own
+// `claims_update_guard` already spells the SUBMIT transition as moving
+// `window_id` with it — which is why nothing here files a second claim.
+//
+// AND THE ORDERING: the promotion runs before the ledger, so a refusal is
+// knowable before a stamp moves. It now refuses the stake instead of debiting.
+// An unreachable store keeps the old posture, deliberately: down and "no" are
+// different facts.
+
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+import { lateCrossingGuard, crossingIsLate, LateCrossingError, LATE_ARRIVAL_PUT_FORWARD } from "../src/world2-pen.mjs";
+import { stakeRefusalFor } from "../src/world-stake.mjs";
+import { currentCrossing, CROSSING_EPOCH_UTC, CROSSING_MS } from "../src/crossings.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const src = (f) => readFileSync(join(HERE, "..", "src", f), "utf8");
+
+// A clock, so "the open window" is a fact this file states rather than inherits
+// from whenever it happens to run. `at(n)` is a moment inside crossing n.
+const at = (n) => CROSSING_EPOCH_UTC + n * CROSSING_MS + 60_000;
+const OPEN = 185;
+const now = at(OPEN);
+const heldAct = (crossing) => ({
+  crossing, actor: "a-resident", action: "leave-mark", class: "mark",
+  object: "a-resident/a-mark", payload: { slug: "a-mark" },
+});
+
+test("the clock this file reasons with is the one the pen uses", () => {
+  assert.equal(currentCrossing(now), OPEN);
+});
+
+// ── (a) A DRAFT FROM A CLOSED WINDOW — the case that was refused ─────────────
+
+test("a held deed from a CLOSED window files into the window it arrives in, keeping the crossing it was composed in", () => {
+  const filed = lateCrossingGuard(heldAct(183), { now, lateArrival: LATE_ARRIVAL_PUT_FORWARD });
+  assert.equal(filed.crossing, OPEN, "the deed did not file into the open window");
+  assert.equal(filed.payload.late_from_crossing, 183, "the composing crossing was not kept on the payload");
+  assert.equal(filed.payload.late_arrival, LATE_ARRIVAL_PUT_FORWARD);
+  assert.equal(filed.payload.slug, "a-mark", "the deed's own payload was not carried through");
+  // Deva's shape, one window along, by the same rule
+  const devas = lateCrossingGuard(heldAct(184), { now: at(186), lateArrival: LATE_ARRIVAL_PUT_FORWARD });
+  assert.equal(devas.crossing, 186);
+  assert.equal(devas.payload.late_from_crossing, 184);
+});
+
+const thrownBy = (fn) => { try { fn(); } catch (e) { return e; } return null; };
+
+test("WITHOUT a reason the law is unchanged: the pen still refuses, in the notary's own words", () => {
+  const e = thrownBy(() => lateCrossingGuard(heldAct(183), { now, env: {} }));
+  assert.ok(e instanceof LateCrossingError, "the pen no longer refuses an unexplained late row");
+  assert.equal(e.crossing, 183);
+  assert.equal(e.open, OPEN);
+  assert.match(e.message, /certified history and the notary refuses to rewrite it/);
+});
+
+test("a FUTURE crossing is refused even with the reason — no excuse files a row into a window that has not opened", () => {
+  const e = thrownBy(() => lateCrossingGuard(heldAct(OPEN + 3), { now, lateArrival: LATE_ARRIVAL_PUT_FORWARD }));
+  assert.ok(e instanceof LateCrossingError, "a future crossing was let through");
+  assert.equal(e.crossing, OPEN + 3);
+});
+
+// ── (b) THE ORDINARY CASE — promoted in place, untouched ─────────────────────
+
+test("a held deed from the OPEN window, or the one just closed at the boundary, is filed unchanged", () => {
+  for (const c of [OPEN, OPEN - 1]) {
+    const filed = lateCrossingGuard(heldAct(c), { now, lateArrival: LATE_ARRIVAL_PUT_FORWARD });
+    assert.equal(filed.crossing, c, `crossing ${c} was restamped and should not have been`);
+    assert.equal(filed.payload.late_from_crossing, undefined, `crossing ${c} was marked a late arrival`);
+    assert.equal(filed.payload.late_arrival, undefined);
+  }
+});
+
+// ── (c) ONE PREDICATE, TWO READERS — the relation, not the wording ───────────
+
+test("the pen restamps EXACTLY the crossings `crossingIsLate` names, so what the resident is told and what the pen did are one fact", () => {
+  let late = 0, ontime = 0;
+  for (const c of [OPEN - 5, OPEN - 2, OPEN - 1, OPEN]) {
+    const said = crossingIsLate(c, { now });
+    const filed = lateCrossingGuard(heldAct(c), { now, lateArrival: LATE_ARRIVAL_PUT_FORWARD });
+    const didRestamp = filed.crossing !== c;
+    assert.equal(didRestamp, said, `predicate and pen disagree at crossing ${c}`);
+    assert.equal("late_from_crossing" in filed.payload, said, `payload and predicate disagree at crossing ${c}`);
+    said ? late++ : ontime++;
+  }
+  assert.ok(late > 0 && ontime > 0, `one-sided matrix: ${late} late / ${ontime} on time`);
+});
+
+// ── (d) THE ORDERING GUARD — a refused promotion never debits ────────────────
+
+test("a promotion the pen REFUSED bounces before the ledger, holding nothing", () => {
+  const standing = { known: true, found: true, retired: false };
+  const refused = stakeRefusalFor({ mark: "a/b", n: 1, promoted: false, status: standing, refused: new LateCrossingError(183, 185) });
+  assert.ok(refused, "a refused promotion did not bounce — the ledger would have debited");
+  assert.equal(refused.error, "bounce");
+  assert.equal(refused.held, 0);
+  assert.equal(refused.requested, 1);
+});
+
+test("an ordinary stake on a standing mark is untouched: no refusal, the ledger runs", () => {
+  const standing = { known: true, found: true, retired: false };
+  assert.equal(stakeRefusalFor({ mark: "a/b", n: 1, promoted: false, status: standing, refused: null }), null);
+  assert.equal(stakeRefusalFor({ mark: "a/b", n: 1, promoted: true, status: standing, refused: null }), null);
+});
+
+test("an UNREACHABLE store keeps the old posture — down and \"no\" are different facts", () => {
+  // the store could not answer: no status, no refusal recorded
+  assert.equal(stakeRefusalFor({ mark: "a/b", n: 1, promoted: false, status: { known: false }, refused: null }), null);
+});
+
+test("THE RELATION: given n ≥ 1 and no promotion, a bounce appears for exactly the refused cases", () => {
+  const standing = { known: true, found: true, retired: false };
+  let bounced = 0, through = 0;
+  for (const refused of [null, new LateCrossingError(183, 185)])
+    for (const status of [standing, { known: false }, { known: true, found: false }]) {
+      const out = stakeRefusalFor({ mark: "a/b", n: 1, promoted: false, status, refused });
+      assert.equal(out !== null, refused !== null, `refusal/bounce disagree for ${JSON.stringify({ refused: !!refused, status })}`);
+      out ? bounced++ : through++;
+    }
+  assert.ok(bounced > 0 && through > 0, `one-sided matrix: ${bounced} bounced / ${through} through`);
+});
+
+// ── (e) THE LAWS THIS RESTS ON, QUOTED FROM THEIR OWN FILES ──────────────────
+
+test("the promotion still runs BEFORE the ledger — the whole ordering guard depends on it", () => {
+  const door = src("world-stake.mjs");
+  const promote = door.indexOf("promoteDraftOnStake({");
+  const gate = door.indexOf("const refusal = stakeRefusalFor(");
+  const ledger = door.indexOf('runExec({ verb: "stake"');
+  assert.ok(promote > 0 && gate > 0 && ledger > 0, "the three steps are no longer all present");
+  assert.ok(promote < gate, "the promotion no longer precedes the refusal gate");
+  assert.ok(gate < ledger, "the refusal gate no longer precedes the ledger's debit — a refusal could charge again");
+});
+
+test("the stake pen still names its standing reason when it releases a held deed", () => {
+  assert.match(src("world2-claims.mjs"), /lateArrival: LATE_ARRIVAL_PUT_FORWARD/,
+    "promoteDraftOnStake no longer declares the late arrival — a slept-on draft would refuse again");
+});

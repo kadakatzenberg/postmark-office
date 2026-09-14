@@ -78,13 +78,41 @@ export class LateCrossingError extends Error {
     this.name = "LateCrossingError"; this.crossing = crossing; this.open = open;
   }
 }
-export function lateCrossingGuard(row, { now = Date.now(), env = process.env } = {}) {
+// `lateArrival` — THE REASON AS AN ARGUMENT, not only as an environment
+// (postmark#2722, 2026-09-13). The env spelling was written for a human running
+// a backfill, and it is process-wide: the only way a CALLER could take this
+// path was to set a variable that then applied to every row the process wrote,
+// which is why no caller ever did. So the one caller that has a standing,
+// auditable reason — a stake putting forward a draft whose window has since
+// closed — could not say it, and the pen refused a lawful act instead. Sophia's
+// ✦1 was debited against a claim that never filed, twice, on 2026-09-12; Deva's
+// hit the same line the next morning. An explicit reason WINS over the env, so
+// a per-row remedy never depends on the ambient one and never widens it.
+// The lateness test itself, named once so the guard and the callers that need
+// to SAY a row arrived late cannot drift into two rules. `true` means the row's
+// crossing is old enough that it may only file with a reason, and that the pen
+// will restamp it with the open window.
+export function crossingIsLate(crossing, { now = Date.now() } = {}) {
+  const open = currentCrossing(now);
+  const c = crossing == null ? null : Number(crossing);
+  if (c == null || !Number.isFinite(c)) return false;
+  return Math.floor(c) < open - 1;
+}
+
+// The one standing reason this office has for a late arrival. A constant rather
+// than a string at the call site, because it is written into permanent rows
+// (`late_arrival` on the payload) and a reader a year from now should find every
+// one of them with a single grep.
+export const LATE_ARRIVAL_PUT_FORWARD =
+  "a stake put a draft forward after the window it was composed in had closed (postmark#2722)";
+
+export function lateCrossingGuard(row, { now = Date.now(), env = process.env, lateArrival = null } = {}) {
   const open = currentCrossing(now);
   const c = row.crossing == null ? null : Number(row.crossing);
   if (c == null || !Number.isFinite(c)) return row;
-  if (Math.floor(c) > open) throw new LateCrossingError(c, open); // the future is not a place a row can file into either (2026-09-04: a raw epoch count sailed through here)
-  if (Math.floor(c) >= open - 1) return row;            // the open window, or the one just closed at the boundary
-  const reason = String(env.W2_LATE_ARRIVAL ?? "").trim();
+  if (Math.floor(c) > open) throw new LateCrossingError(c, open); // the future is not a place a row can file into either (2026-09-04: a raw epoch count sailed through here) — and no reason excuses it
+  if (!crossingIsLate(c, { now })) return row;          // the open window, or the one just closed at the boundary
+  const reason = String(lateArrival ?? env.W2_LATE_ARRIVAL ?? "").trim();
   if (!reason) throw new LateCrossingError(c, open);
   const payload = { ...(typeof row.payload === "string" ? JSON.parse(row.payload) : (row.payload ?? {})), late_from_crossing: c, late_arrival: reason };
   return { ...row, crossing: open, payload: typeof row.payload === "string" ? JSON.stringify(payload) : payload };
@@ -226,8 +254,11 @@ export async function officeRead(fn, { env = process.env } = {}) {
   }
 }
 
-export async function insertAct(client, rowIn, seq = null) {
-  const row = lateCrossingGuard(rowIn); // throws LateCrossingError — never a pen-unreachable, never silent
+export async function insertAct(client, rowIn, seq = null, { lateArrival = null } = {}) {
+  // `lateArrival` is the caller's standing reason for a row whose crossing has
+  // fallen behind the open window (§ lateCrossingGuard). Absent it, this still
+  // throws LateCrossingError — never a pen-unreachable, never silent.
+  const row = lateCrossingGuard(rowIn, { lateArrival });
   const { householdKeyFor } = await import("./world2-claims.mjs");
   const household = row.household == null ? null : await householdKeyFor(client, row.household);
   const { rows: [r] } = await client.query(
