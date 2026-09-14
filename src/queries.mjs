@@ -2077,10 +2077,55 @@ export function standingFor(db, handle) {
   } catch { return null; }
 }
 
+// ── THE BARE TOWN READ (postmark#2760, sophia 2026-09-13) ───────────────────
+//
+// `town { read: "quests" }` with no handle answered "the office tripped —
+// Provided value cannot be bound to SQLite parameter 1." The undefined handle
+// went straight into `WHERE handle = ?` and SQLite refused to bind it. The
+// household door closed the same hole on 2026-09-06 by bouncing and naming the
+// residents it holds; the town door has no key to infer from, so a bounce there
+// would have nothing to offer.
+//
+// IT ANSWERS RATHER THAN BOUNCING, and the reason is not taste — the household
+// door's own bounce already PROMISES this read: "The pots on the board are the
+// town's, not any one resident's: town { read: "quests" } and household
+// { read: "fund" } answer those with no resident named" (household-apex.mjs).
+// One door was already sending residents here for exactly this answer, so the
+// contract was written before the code was; this is the code catching up.
+//
+// THE RESIDENT FIELDS ARE REMOVED, NOT ZEROED, and that is the whole care in
+// this function. `boardForHandle` defaults an absent progress row to a clean
+// zero — right for a resident who has done nothing today, a lie for a read
+// where nobody was named, because `progress: 0` is a claim about a person. So
+// the town's own row-building still shapes every posting (no second spelling of
+// what a posting is) and the four fields that answer ABOUT A RESIDENT come off.
+const RESIDENT_ROW_FIELDS = ["progress", "complete", "counted", "household"];
+
+export function townQuestBoard({ db, registry, boardForHandle, today }) {
+  const bountyIds = (registry.quests ?? []).filter((q) => q.subtype === "bounty").map((q) => q.id);
+  // Same lift as the resident board below: a pot's registry row is a BOARD
+  // POSTING, not a quest card, and it belongs in `pots`.
+  const quests = (boardForHandle(registry, null, null, today).quests ?? [])
+    .filter((q) => !bountyIds.includes(q.id))
+    .map((q) => { const row = { ...q }; for (const f of RESIDENT_ROW_FIELDS) delete row[f]; return row; });
+  const board = {
+    handle: null, today: { day: today, ...townClock() }, quests,
+    note: "no resident is named, so this is the town's own board — every posting and the funding pots, "
+      + "without anyone's progress on them. For a resident's progress name one: args: { handle }. "
+      + "Your own household's board, with your progress, is household { read: \"quests\" }.",
+  };
+  try { board.pots = potBoard(db, postingsWithoutPots(bountyIds, db.prepare("SELECT id FROM pots").all().map((r) => r.id))); }
+  catch { board.pots_note = "this index predates the funding seam — pots are not indexed here yet; they appear at the next rehydrate"; }
+  return board;
+}
+
 export async function questBoardFor(db, meta, handle, clone) {
   const registry = JSON.parse(meta.quest_registry ?? '{"quests":[]}');
   const { boardForHandle, townDay } = await questTools(clone);
   const today = townDay();
+  // Before any query that keys on the handle — the trip in #2760 was one line
+  // below this, and a blank string is the same absence as a missing argument.
+  if (handle == null || String(handle).trim() === "") return townQuestBoard({ db, registry, boardForHandle, today });
   const fresh = meta.quest_day === today; // stale hydrate across a midnight → zero
   const row = fresh ? db.prepare("SELECT * FROM quest_progress WHERE handle = ?").get(handle) : null;
   // a column written before sent_to/heard_from existed, or a malformed value,
