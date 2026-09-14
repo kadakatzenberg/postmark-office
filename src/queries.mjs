@@ -1589,7 +1589,14 @@ export async function nextStepsFor(db, meta, handle, clone, { own = false, world
     const worldSited = own ? await worldSitedFor(handle, { worldBlock }) : null;
     const onboarding = tools.onboardingBoard(registry, facts, handle, { worldSited });
     const paperRows = own ? await paperGapRows(handle, { db, clone, worldBlock }) : null;
-    const questBoard = await questBoardFor(db, meta, handle, clone);
+    // THE VERDICT RIDES DOWN, NOT THE READER (#2773, and the 08-15 gate is why).
+    // `worldSited` above is already this doorstep's decision: the world read for
+    // an own door, and a deliberate NON-read — null, nobody looked — for a
+    // stranger's. Handing the board the reader instead would have sent it to ask
+    // the very question the gate skipped, one layer down where the skip is
+    // invisible; handing it the verdict keeps the gate whole and keeps the whole
+    // doorstep to one world open.
+    const questBoard = await questBoardFor(db, meta, handle, clone, { worldSited });
     // ── WHAT THE COMPOSER IS HANDED, AND WHY IT IS NOT THE BOARD VERBATIM ────
     //
     // `composeNextSteps` writes a step's tail as `(${q.progress}/${q.target}
@@ -2045,7 +2052,7 @@ export const STANDING_NOTES = Object.freeze({
  * about. Where nothing can be known the row keeps `progress: null` and carries
  * a `note` saying which surface knows instead. Never a 0 standing in for a null.
  */
-export function standingJoin(q, standing, { idea = null } = {}) {
+export function standingJoin(q, standing, { idea = null, worldSited = null } = {}) {
   const fact = STANDING_FACT[q.id];
   if (fact) {
     if (!standing || !(fact in standing)) return { note: STANDING_NOTES.no_index };
@@ -2095,7 +2102,39 @@ export function standingJoin(q, standing, { idea = null } = {}) {
       earned_with: (d.friends ?? []).map((f) => ({ with: f.with, threshold: f.threshold, date: f.date })),
     };
   }
-  if (q.id === "walk-the-world") return { note: STANDING_NOTES.world_elsewhere };
+  if (q.id === "walk-the-world") {
+    // ── THE OFFICE LOOKS NOW (#2773) ────────────────────────────────────────
+    //
+    // This row answered `complete: null` with "your ground in the World is kept
+    // somewhere this page cannot see" — and the resident page files every
+    // uncounted row that is not `complete: true` under STILL TO DO. So a
+    // resident whose home mark had stood for weeks was told to go and leave it.
+    // "Not looked" rendered as "not done", which is the #1864 defect the town's
+    // own onboarding composer refuses in as many words.
+    //
+    // The office already derives the fact. `worldBlockForHandle` answers
+    // `sited`, `worldSitedFor` reduces it to the three-way the disclosure guard
+    // requires, and `read_home` has published the same block at a PUBLIC door
+    // all along — so filling this row discloses nothing a visitor could not
+    // already read at GET /homes/{handle}.
+    //
+    // ⚑ NULL IS STILL AN ANSWER AND KEEPS ITS NOTE. `the-town/the-disclosure`
+    // forbids substituting a readable "no" for an unreadable one: an office that
+    // cannot see the world this minute must not say the mark is missing. The
+    // note stays exactly as it was for that case, and only that case.
+    //
+    // ⚑ PURE, LIKE THE REST OF THIS FUNCTION. The world read is async and the
+    // whole point of `standingJoin` is that every falsifier drives the real
+    // function rather than a copy — so the fact arrives as a parameter, the way
+    // `idea` does, and the caller owns the one read.
+    //
+    // No `since`: the block carries a place, not a day. A row that invented one
+    // would be worse than a row without one, and `no_date`'s sentence ("the
+    // town does not keep the day") is not true here — the world keeps it; this
+    // read does not fetch it.
+    if (worldSited == null) return { note: STANDING_NOTES.world_elsewhere };
+    return { progress: worldSited ? 1 : 0, complete: worldSited, since: null };
+  }
   return null;
 }
 
@@ -2107,7 +2146,25 @@ export function standingFor(db, handle) {
   } catch { return null; }
 }
 
-export async function questBoardFor(db, meta, handle, clone) {
+// ── THE TWO WORLD OPTIONS, AND WHY THERE ARE TWO (#2773) ────────────────────
+//
+// `worldSited` — the three-way ALREADY DECIDED by the caller, used verbatim and
+// with NO read of its own. It exists for the 08-15 gate, and it is the reason
+// this board can be embedded in a doorstep without breaking a ruling: Keemin's
+// word is "the gaps are yours to see, not theirs to be seen by", and whether a
+// home is sited is one of the two gap-shaped facts named under it. `nextStepsFor`
+// has already made that decision — it reads the world for an OWN doorstep and
+// deliberately does not look at all for a stranger's — so it hands the verdict
+// down rather than letting this board go and ask a question the gate forbade.
+// A skip that turns into a read one layer down is not a skip.
+//
+// `worldBlock` — the READER to use when nobody has decided. It keeps the whole
+// doorstep down to one world open (`nextStepsFor` memoises it across the paper
+// gaps and the onboarding row) and lets a fixture own its own world.
+//
+// Neither given (the bare `/quests/{handle}` door, which is public and which the
+// resident page reads), the board reads the world itself.
+export async function questBoardFor(db, meta, handle, clone, { worldSited: decided = undefined, worldBlock = null } = {}) {
   const registry = JSON.parse(meta.quest_registry ?? '{"quests":[]}');
   const { boardForHandle, townDay } = await questTools(clone);
   const today = townDay();
@@ -2125,6 +2182,22 @@ export async function questBoardFor(db, meta, handle, clone) {
   // ONE world-store read for the first-idea row: `boardForHandle` wants the
   // boolean and the standing join wants the date beside it.
   const idea = firstIdeaStanding(handle);
+  // ── AND ONE WORLD READ FOR THE `walk-the-world` ROW (#2773) ───────────────
+  //
+  // `worldSitedFor` is the three-way the disclosure guard asks for — true,
+  // false, or NULL when the office cannot see the world this minute — and it is
+  // the SAME function the doorstep's onboarding row already calls, so the two
+  // surfaces cannot come to disagree about whether a home is standing.
+  //
+  // AT THE BARE DOOR THIS IS NOT GATED, and the reason is that the fact is
+  // already published: `GET /homes/{handle}` has served the same world block
+  // keyless to anyone since it opened. This board IS the public
+  // `/quests/{handle}` door, which is what the resident page reads, so gating it
+  // would leave every visitor's view of that page carrying the defect this
+  // fixes. INSIDE A DOORSTEP the caller decides instead, and `decided` is how
+  // the 08-15 gate reaches down here intact — see the note on the signature.
+  const worldSited = decided !== undefined ? decided
+    : await (await import("./household-apex.mjs")).worldSitedFor(handle, worldBlock ? { worldBlock } : {});
   const standing = standingFor(db, handle);
   const board = boardForHandle(registry, prog, handle, today, { complete: idea ? { "first-idea": idea.complete } : null });
   // The funding pots ride the same board (funding seam, 2026-08-21) — pots are
@@ -2211,7 +2284,7 @@ export async function questBoardFor(db, meta, handle, clone) {
   board.quests = (board.quests ?? [])
     .filter((q) => !bountyIds.includes(q.id))
     .map((q) => {
-      const patch = standingJoin(q, standing, { idea });
+      const patch = standingJoin(q, standing, { idea, worldSited });
       const row = patch ? { ...q, ...patch } : q;
       return { ...row, measured: typeof row.progress === "number" };
     });
