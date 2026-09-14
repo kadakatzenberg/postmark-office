@@ -21,7 +21,7 @@ jobs:
           failures=0
           : > claim-ledger-summary.txt
           for n in $(seq 1 10); do
-            echo "=== run $n ===" | tee -a claim-ledger-summary.txt
+            echo "=== serial run $n ===" | tee -a claim-ledger-summary.txt
             set +e
             node --test --test-timeout=180000 test/claim-ledger.test.mjs > "claim-ledger-$n.txt" 2>&1
             code=$?
@@ -30,16 +30,41 @@ jobs:
             grep '^# pass\|^# fail\|^not ok' "claim-ledger-$n.txt" | tee -a claim-ledger-summary.txt || true
             if [ "$code" -ne 0 ]; then failures=$((failures + 1)); fi
           done
-          echo "failed_runs=$failures" | tee -a claim-ledger-summary.txt
-          echo "$failures" > claim-ledger-failures.txt
+          echo "serial_failed_runs=$failures" | tee -a claim-ledger-summary.txt
+          echo "$failures" > claim-ledger-serial-failures.txt
+      - name: Run two copies concurrently
+        shell: bash
+        run: |
+          set +e
+          node --test --test-timeout=180000 test/claim-ledger.test.mjs > claim-ledger-concurrent-a.txt 2>&1 &
+          pid_a=$!
+          node --test --test-timeout=180000 test/claim-ledger.test.mjs > claim-ledger-concurrent-b.txt 2>&1 &
+          pid_b=$!
+          wait "$pid_a"; code_a=$?
+          wait "$pid_b"; code_b=$?
+          set -e
+          echo "=== concurrent A ===" | tee -a claim-ledger-summary.txt
+          echo "exit=$code_a" | tee -a claim-ledger-summary.txt
+          grep '^# pass\|^# fail\|^not ok' claim-ledger-concurrent-a.txt | tee -a claim-ledger-summary.txt || true
+          echo "=== concurrent B ===" | tee -a claim-ledger-summary.txt
+          echo "exit=$code_b" | tee -a claim-ledger-summary.txt
+          grep '^# pass\|^# fail\|^not ok' claim-ledger-concurrent-b.txt | tee -a claim-ledger-summary.txt || true
+          concurrent_failures=0
+          if [ "$code_a" -ne 0 ]; then concurrent_failures=$((concurrent_failures + 1)); fi
+          if [ "$code_b" -ne 0 ]; then concurrent_failures=$((concurrent_failures + 1)); fi
+          echo "concurrent_failed_runs=$concurrent_failures" | tee -a claim-ledger-summary.txt
+          echo "$concurrent_failures" > claim-ledger-concurrent-failures.txt
       - name: Upload reproduction evidence
         uses: actions/upload-artifact@v4
         with:
           name: claim-ledger-reproduction
           path: |
             claim-ledger-summary.txt
-            claim-ledger-failures.txt
+            claim-ledger-serial-failures.txt
+            claim-ledger-concurrent-failures.txt
             claim-ledger-*.txt
-      - name: Preserve reproduction result
+      - name: Require clean serial runs and a concurrent collision
         shell: bash
-        run: test "$(cat claim-ledger-failures.txt)" -eq 0
+        run: |
+          test "$(cat claim-ledger-serial-failures.txt)" -eq 0
+          test "$(cat claim-ledger-concurrent-failures.txt)" -ge 1
