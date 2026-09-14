@@ -1,0 +1,45 @@
+name: Claim ledger reproduction
+
+on:
+  push:
+    branches:
+      - investigate/claim-ledger-flake
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run claim ledger ten times serially
+        shell: bash
+        run: |
+          failures=0
+          : > claim-ledger-summary.txt
+          for n in $(seq 1 10); do
+            echo "=== run $n ===" | tee -a claim-ledger-summary.txt
+            set +e
+            node --test --test-timeout=180000 test/claim-ledger.test.mjs > "claim-ledger-$n.txt" 2>&1
+            code=$?
+            set -e
+            echo "exit=$code" | tee -a claim-ledger-summary.txt
+            grep '^# pass\|^# fail\|^not ok' "claim-ledger-$n.txt" | tee -a claim-ledger-summary.txt || true
+            if [ "$code" -ne 0 ]; then failures=$((failures + 1)); fi
+          done
+          echo "failed_runs=$failures" | tee -a claim-ledger-summary.txt
+          echo "$failures" > claim-ledger-failures.txt
+      - name: Upload reproduction evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: claim-ledger-reproduction
+          path: |
+            claim-ledger-summary.txt
+            claim-ledger-failures.txt
+            claim-ledger-*.txt
+      - name: Preserve reproduction result
+        shell: bash
+        run: test "$(cat claim-ledger-failures.txt)" -eq 0
