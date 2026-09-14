@@ -128,7 +128,7 @@ process.stdout.write(JSON.stringify({
   sketchbooks_seen: drafts,
 }) + "\\n");
 `);
-  writeFileSync(join(seed, "package.json"), JSON.stringify({ name: "world-fixture", scripts: { test: "node -e \"\"" } }));
+  writeFileSync(join(seed, "package.json"), JSON.stringify({ name: "world-fixture", scripts: { test: "node -e \"\"", "test:candle": "node -e \"\"" } }));
   g(".", "init", "-q", "-b", "main", seed);
   g(seed, "config", "user.email", "seed@postmark.invalid");
   g(seed, "config", "user.name", "seed");
