@@ -1086,7 +1086,7 @@ function publishedPathIndex(repo, sha) {
       const slug = parts[parts.length - 1];
       if (!slug) continue;
       if (parts.length === 2) byId.set(`${parts[0]}/${parts[1]}`, path);  // filed at its id
-      bySlug.set(slug, bySlug.has(slug) ? null : path);                   // null = ambiguous
+      else bySlug.set(slug, bySlug.has(slug) ? null : path);              // legacy only; null = ambiguous
     }
   } catch { /* no tree at this sha → every published path is unknown, and says so by being absent */ }
   _pathIndex = { repo, sha, bySlug, byId };
