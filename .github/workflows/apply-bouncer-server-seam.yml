@@ -1,0 +1,48 @@
+name: Apply bouncer server seam
+
+on:
+  push:
+    branches:
+      - fix/bouncer-server-clock
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]' && contains(github.event.head_commit.message, 'ci: apply bouncer server seam')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/bouncer-server-clock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Put the clock seam at the process boundary
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/server.mjs')
+          text = path.read_text()
+          old = 'const bouncer = new Bouncer();'
+          if text.count(old) != 1:
+              raise SystemExit(f'expected exactly one bouncer construction, found {text.count(old)}')
+          new = '''// Keep the deterministic clock seam at the process boundary: Bouncer stays\n// environment-agnostic, while the real HTTP integration test can pin only its\n// clock without freezing every other clock in this server. Production omits the\n// flag and therefore keeps Date.now exactly as before.\nconst bouncerNowArg = arg("--bouncer-now-ms", null);\nconst bouncerNow = (() => {\n  if (bouncerNowArg === null) return Date.now;\n  const fixed = Number(bouncerNowArg);\n  if (!Number.isFinite(fixed))\n    throw new Error("--bouncer-now-ms must be a finite millisecond timestamp");\n  return () => fixed;\n})();\nconst bouncer = new Bouncer({ now: bouncerNow });'''
+          path.write_text(text.replace(old, new))
+          PY
+          git diff --check
+      - name: Verify focused suites before commit
+        run: node --test --test-timeout=180000 test/bouncer.test.mjs test/bouncer-server.test.mjs
+      - name: Commit verified repair
+        shell: bash
+        run: |
+          git config user.name "kadakatzenberg"
+          git config user.email "131329396+kadakatzenberg@users.noreply.github.com"
+          git add src/server.mjs
+          git commit -m "fix: inject bouncer clock at server boundary"
+          git push origin HEAD:fix/bouncer-server-clock
