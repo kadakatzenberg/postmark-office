@@ -13,7 +13,11 @@ const WHO = "sophia-familiaris";
 const SHIP_ID = "the-town/the-post-office";
 const key = { handles: new Set([WHO]) };
 
-function fakeLawClone() {
+// `carrierInChain` added on review (2026-09-13), defaulting to the behaviour
+// every test above already had: the engine's threshold chain names the carrier.
+// Passing false gives an engine whose chain does NOT — a mark ashore, which the
+// resident is not aboard — which is the only way to exercise the ancestor gate.
+function fakeLawClone({ carrierInChain = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "postmark-2712-"));
   mkdirSync(join(dir, "tools"), { recursive: true });
   writeFileSync(join(dir, "tools", "enter-exit.mjs"), `
@@ -38,7 +42,7 @@ function fakeLawClone() {
     export function enter(state, targetId, world, { occupancy, handle }) {
       const target = world.marks.find((m) => m.id === targetId);
       if (!target) return { error: "missing target" };
-      const chain = ["${SHIP_ID}", targetId];
+      const chain = ${carrierInChain ? '["' + SHIP_ID + '", targetId]' : "[targetId]"};
       const held = occupancy.get(handle) ?? [];
       const links = chain.filter((id) => !held.includes(id));
       const standing = pointInBox(state, target);
@@ -152,4 +156,29 @@ test("#2712 — the entry succeeds through the OFFICE'S projection, not only thr
   const answer = await enterViaOffice(c.dir, { mark: wheelhouse.id, handle: WHO }, key, d);
   assert.deepEqual(answer.entered, [wheelhouse.id],
     "the door refused a resident standing at the door — the composition is unreachable through the office's own standpoint, which is #2712 still open");
+});
+
+test("#2712 — a mark the resident is NOT aboard is never dragged along by the carrier", async (t) => {
+  // THE GATE'S OWN FALSIFIER, added on review. Removing the engine's ancestor
+  // check (`plan.chain.includes(here.frame)`) left every test above green,
+  // because their fixture engine always names the carrier in the chain — so the
+  // one line standing between "compose the frame" and "translate any mark the
+  // asker happens to be riding past" was unguarded.
+  //
+  // Here the chain does NOT name the carrier: a shore door, at the town centre,
+  // while the resident is 1.8 km away on a boat. It must be measured where it
+  // stands. Composed instead, the boat's displacement would carry the door to
+  // the resident's feet and let her walk through a building she is nowhere near.
+  const c = fakeLawClone({ carrierInChain: false }); t.after(c.cleanup);
+  const ship = { id: SHIP_ID, kind: "sited", at: { x: 0, y: 0 }, extent: { w: 10, h: 26 } };
+  const shoreDoor = { id: "the-town/the-counting-house", kind: "sited", at: { x: 0, y: 0 }, extent: { w: 4, h: 4 } };
+  const world = { marks: [ship, shoreDoor] };
+  const standpoint = { x: 1800, y: 400, placed: true, aboard: true, moving: false, frame: SHIP_ID, frame_offset: { x: 0, y: 0 } };
+  const d = deps(world, standpoint);
+  d.standpointOf = async () => standpointForCrossing(standpoint, WHO);
+  const e = await enterViaOffice(c.dir, { mark: shoreDoor.id, handle: WHO }, key, d).then(() => null, (err) => err);
+  assert.equal(e?.code, 409, "a door ashore was entered from a boat 1.8 km away — the carrier frame was applied to a mark not aboard it");
+  assert.deepEqual(e.walk?.to, { x: 0, y: 0 },
+    "the remedy points somewhere other than where the shore door actually stands");
+  assert.match(e.hint ?? "", /\(0, 0\)/);
 });
