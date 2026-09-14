@@ -56,23 +56,6 @@ const assertPositive = (label, value) => {
   if (!Number.isFinite(value) || value <= 0) throw new Error(`${label} must be positive`);
 };
 
-// The HTTP integration test boots the real server in a child process. The
-// Bouncer has always accepted an injected clock, but `server.mjs` constructs it
-// with no arguments, so that test was forced back onto wall time and could
-// refill a bucket whenever the box stalled long enough (#16). Keep the seam at
-// the component that owns time: production still gets Date.now, while a test
-// process may pin only the bouncer's clock without freezing every other clock in
-// the server.
-const defaultNow = () => {
-  if (process.env.NODE_ENV !== "test") return Date.now;
-  const raw = process.env.OFFICE_TEST_BOUNCER_NOW_MS;
-  if (raw == null || raw === "") return Date.now;
-  const instant = Number(raw);
-  if (!Number.isFinite(instant))
-    throw new Error("OFFICE_TEST_BOUNCER_NOW_MS must be a finite millisecond timestamp");
-  return () => instant;
-};
-
 class TokenBucket {
   constructor({ perMinute, burst, now }) {
     assertPositive("perMinute", perMinute);
@@ -184,7 +167,7 @@ export const worldWriteVerbForRest = (method, path) => {
 };
 
 export class Bouncer {
-  constructor({ limits, now = defaultNow(), log = (line) => console.warn(line) } = {}) {
+  constructor({ limits, now = Date.now, log = (line) => console.warn(line) } = {}) {
     this.limits = mergeLimits(limits);
     this.now = now;
     this.log = log;
