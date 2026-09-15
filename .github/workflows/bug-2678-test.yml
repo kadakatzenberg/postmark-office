@@ -32,7 +32,6 @@ jobs:
               old_sig = 'export function validateLetter({ from, to, title, thread, body, stake_topic, stake_candidate, stake_stamps }, key, db) {'
               assert text.count(old_sig) == 1
               text = text.replace(old_sig, new_sig, 1)
-
               old_identity = (
                   '  const date = letterDate();\n'
                   '  const slug = slugify(title);\n'
@@ -83,7 +82,6 @@ jobs:
               )
               assert text.count(old_identity) == 1
               text = text.replace(old_identity, new_identity, 1)
-
               old_enqueue = (
                   'export function enqueueLetter(args, key, db, clone) {\n'
                   '  const { id, from, to, date, thread, slug, stakeFm, body } = validateLetter(args, key, db);'
@@ -94,7 +92,6 @@ jobs:
               )
               assert text.count(old_enqueue) == 1
               text = text.replace(old_enqueue, new_enqueue, 1)
-
               old_file = '  const file = join(clone, outboxRelPath(from, date, to, slug));'
               assert text.count(old_file) == 1
               text = text.replace(old_file, '  const file = join(clone, relFile);', 1)
@@ -133,10 +130,17 @@ jobs:
           printf '%s\n' "$output" | grep -F "the drain must return the id the send door already accepted, not one derived from drain time" >/dev/null
           git apply /tmp/2678.patch
 
-      - name: Restore GREEN and run the neighboring mail suites
-        run: |
-          node --test test/mail-accepted-identity.test.mjs
-          node --test test/town-mail.test.mjs test/town-bridge.test.mjs test/foyer-shrink.test.mjs
+      - name: GREEN after flip restore
+        run: node --test test/mail-accepted-identity.test.mjs
+
+      - name: Neighbor suite · town-mail
+        run: node --test test/town-mail.test.mjs
+
+      - name: Neighbor suite · town-bridge
+        run: node --test test/town-bridge.test.mjs
+
+      - name: Neighbor suite · foyer-shrink
+        run: node --test test/foyer-shrink.test.mjs
 
       - name: Commit the repair back to the branch
         shell: bash
