@@ -522,14 +522,24 @@ function markName(mark, marks) {
 // which is the only question a serving flag actually has to answer. A second
 // implementation over the store would have made the diff measure my typing.
 export function placeWordsFrom(marks, { x, y }, verbs) {
-  const spine = verbs.containmentChain({ x, y }, marks).filter((m) => m.id !== WORLD_FRAME);
+  // A THING IS NOT GROUND. The viewer has said so since 2026-08-22 (Keemin:
+  // carried things were winning the walk desk's "From"); this is the office
+  // half, 2026-09-15 (Linear POS-92). A class:thing mark rides at its holder's
+  // feet or sits at its room's centre — the 0.2 m pocket lantern at the exact
+  // centre of Rei's house was Sollerino's place string. You stand IN rooms and
+  // ON things: an object never answers "where", however small or large.
+  // Class-keyed, not size-keyed — a bench is ground, a giant sculpture is not.
+  // Filtered BEFORE the chain so the nest is built over ground alone; the full
+  // list still names things (a naming mark may name anything).
+  const ground = marks.filter((m) => m?.class !== "thing");
+  const spine = verbs.containmentChain({ x, y }, ground).filter((m) => m.id !== WORLD_FRAME);
   if (spine.length) {
     const inner = markName(spine[spine.length - 1], marks);
     const outer = markName(spine[0], marks);
     return inner === outer ? inner : `${inner}, ${outer}`;
   }
   let best = null, bd = Infinity;
-  for (const m of marks) {
+  for (const m of ground) {
     if (!m.at || !(m.kind === "sited" || m.kind === "parcel")) continue;
     const d = Math.hypot(m.at.x - x, m.at.y - y);
     if (d < bd) { bd = d; best = m; }
