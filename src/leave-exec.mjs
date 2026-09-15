@@ -196,15 +196,24 @@ async function main() {
     // that has not yet pulled the constant.
     const side = PARCEL_EXTENT_M ?? 25;
     p.extent = { w: side, h: side };
-    const cap = PARCEL_CLAIM_CAP ?? 3;
-    let registry = null;
-    try { registry = JSON.parse(readFileSync(join(CLONE, "WORLD", "households.json"), "utf8")).households ?? null; } catch { /* no registry → solo grain */ }
-    const credOf = (handle) => registry?.[handle] ?? `solo:${handle}`;
-    const cred = credOf(p.by);
-    const held = marks.filter((m) => m.kind === "parcel" && credOf(m.by ?? m.household) === cred).length;
-    if (held >= cap)
-      return err(403, `your household already holds ${held} parcel${held === 1 ? "" : "s"}`,
-        `parcel claiming is capped at ${cap} per household (ruled ${PARCEL_CAP_LAW_DATE ?? "2026-07-30"}; prior holdings stand) — new ground for this household is the founder's word, not the door's`);
+    // THE CAP ASKS ONLY OF NEW GROUND (2026-09-15, Linear POS-88; the instance:
+    // Current re-amending the-keepers-flat, held since S45, bounced "already
+    // holds 4 parcels"). `amending` was computed above and never consulted here,
+    // so `held` counted the very parcel being amended and an amendment of a
+    // holding read as a claim for new ground. The law's own sentence below says
+    // prior holdings stand; an amendment of one is not a claim. The extent dial
+    // above still applies to every parcel act — every parcel is the town's square.
+    if (!amending) {
+      const cap = PARCEL_CLAIM_CAP ?? 3;
+      let registry = null;
+      try { registry = JSON.parse(readFileSync(join(CLONE, "WORLD", "households.json"), "utf8")).households ?? null; } catch { /* no registry → solo grain */ }
+      const credOf = (handle) => registry?.[handle] ?? `solo:${handle}`;
+      const cred = credOf(p.by);
+      const held = marks.filter((m) => m.kind === "parcel" && credOf(m.by ?? m.household) === cred).length;
+      if (held >= cap)
+        return err(403, `your household already holds ${held} parcel${held === 1 ? "" : "s"}`,
+          `parcel claiming is capped at ${cap} per household (ruled ${PARCEL_CAP_LAW_DATE ?? "2026-07-30"}; prior holdings stand) — new ground for this household is the founder's word, not the door's`);
+    }
   }
 
   // decide the directory. sited/parcel file BY IDENTITY — `WORLD/marks/<by>/
