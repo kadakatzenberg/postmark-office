@@ -1,0 +1,39 @@
+name: Finalize #2798 on current w39
+
+on:
+  push:
+    branches: [finalize/2798-current-w39]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Save verified test repair
+        run: cp test/settlement-source-flip.test.mjs /tmp/settlement-source-flip.test.mjs
+      - name: Reset onto current upstream w39
+        run: |
+          git fetch https://github.com/keeminlee/postmark-office.git '+refs/heads/train/*:refs/remotes/origin/train/*'
+          test "$(git rev-parse refs/remotes/origin/train/2026-w39)" = "2879fd11bf2996429de0d4937cc2a67ff68e778e"
+          git reset --hard refs/remotes/origin/train/2026-w39
+          cp /tmp/settlement-source-flip.test.mjs test/settlement-source-flip.test.mjs
+          git diff --check
+          test "$(git diff --name-only)" = "test/settlement-source-flip.test.mjs"
+      - run: npm ci
+      - name: Verify settlement source flip
+        run: node --test test/settlement-source-flip.test.mjs
+      - name: Publish one clean commit
+        run: |
+          git config user.name "kadakatzenberg"
+          git config user.email "131329396+kadakatzenberg@users.noreply.github.com"
+          git add test/settlement-source-flip.test.mjs
+          git commit -m "test: keep settlement flip tied to open train (#2798)"
+          git push --force-with-lease=refs/heads/fix/2798-open-train-flip:15df690b6ad4d342bad0952b7bedb10389f4545c origin HEAD:refs/heads/fix/2798-open-train-flip
