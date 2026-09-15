@@ -24,7 +24,7 @@ import { marksCountsFor } from "./town-marks.mjs";
 import { sendLetterAsRow } from "./town-mail.mjs"; // wave 3: the same letter, as a town-log row
 import { townLogEnabled } from "./town-journal.mjs";
 import { updateAddressBody, updateHome, updateHomeImage, updateProfile, updateProfileAvatar, updateWindow } from "./edit.mjs";
-import { handleMcp, TOOLS as MCP_TOOLS, validateArgs } from "./mcp.mjs";
+import { handleMcp, TOOLS as MCP_TOOLS, validateArgs, visitorBounces, VISITOR_BOUNCE } from "./mcp.mjs";
 import { householdApex } from "./household-apex.mjs"; // the third door (2026-08-15)
 import { handleOauth, oauthLookup, openOauthDb, mintHouseholdKey, keyLookup, mintBerth, berthLookup, berthTaken, BERTH_SLUG, FROM_TOWN, mintClaim, claimLookup, claimState, claimCosignUrlFor, claimStateUrlFor, sweepClaims } from "./oauth.mjs";
 import { requestResidency } from "./residency.mjs";
@@ -1742,6 +1742,9 @@ const server = createServer((req, res) => {
       readJsonBody(req).then(async (raw) => {
         try {
           const payload = JSON.parse(raw || "{}");
+          // A visitor's act, decided by the verb it resolves to — the same
+          // decision and the same words as the MCP door (postmark#2816 sweep).
+          if (visitorBounces("household", payload, key)) return bounce(res, 403, VISITOR_BOUNCE.defect, VISITOR_BOUNCE.hint);
           const r = await householdApex(payload, key, { db, clone: TOWN_CLONE, odb, dbPath: DB_PATH, pen: PEN, canWrite, meta, asOf: AS_OF, schemas: flatPropsFromTools(), schemaRequired: flatRequiredFromTools(), channel, strictFields: true });
           return j(res, r?.error ? (r.code ?? 400) : 200, r);
         } catch (e) {
@@ -1878,6 +1881,7 @@ const server = createServer((req, res) => {
             const limited = bouncer.checkHouseholdWorldWrite({ household: key.household, verb });
             if (limited) return rateResponse(res, limited);
             if (harborGated(key, verb)) return bounce(res, HARBOR_BOUNCE.code, HARBOR_BOUNCE.defect, HARBOR_BOUNCE.hint);
+            if (visitorBounces("world", payload, key)) return bounce(res, 403, VISITOR_BOUNCE.defect, VISITOR_BOUNCE.hint);
             // and the standing gate, inside the `do:` branch for the same
             // reason the harbor's is: the bare and `read:` shapes of this route
             // are reads, and reads are never suspended.
