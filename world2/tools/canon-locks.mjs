@@ -78,6 +78,19 @@ export const ESCROW_BY_SHA_SELECT = `
  *
  * The question that is actually being asked is whether the SLUG reached the
  * register, so that is what this asks.
+ *
+ * A TRANSFER IS NOT UNMATERIALIZED either — the third thing (2026-09-15).
+ * DEC-16 re-identifies a mark that changes hands: the row keeps its id and its
+ * slug moves. The claim that locked it keeps the OLD slug, because it is the
+ * historical fact of what was ruled in at that window — so the slug question
+ * finds no mark and lists a claim whose own row is standing under the new name.
+ * `the-town/the-lanternstep-parlor`, locked at window 172, has stood as
+ * `wright/the-lanternstep-parlor` since the 08-29 transfer (act 4930); it sat
+ * on the roll-call as unmaterialized for a week and was nearly RETIRED by hand,
+ * which DEC-16 names as the rejected alternative: it costs the mark its escrow
+ * and its whole history under the old identity. So the second question: does
+ * the claim's own row exist. A row that never materialized has no row by id
+ * either, so the never-stood class is still listed.
  */
 export const UNMATERIALIZED_SELECT = `
   SELECT c.id::text AS claim_id, c.window_id, c.claimant,
@@ -86,6 +99,7 @@ export const UNMATERIALIZED_SELECT = `
    WHERE c.status = 'locked'
      AND coalesce(c.slug, c.geometry->>'slug') IS NOT NULL
      AND NOT EXISTS (SELECT 1 FROM marks m WHERE m.slug = coalesce(c.slug, c.geometry->>'slug'))
+     AND NOT EXISTS (SELECT 1 FROM marks m WHERE m.id = c.id)
    ORDER BY c.window_id, slug`;
 
 /**
