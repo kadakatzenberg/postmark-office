@@ -1,0 +1,70 @@
+name: Finalize #2678 clean repair
+
+on:
+  push:
+    branches: [finalize/2678-clean]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Save verified repair inputs
+        run: |
+          cp test/mail-accepted-identity.test.mjs /tmp/mail-accepted-identity.test.mjs
+          cp test/helpers/verify-2678-patch.py /tmp/verify-2678-patch.py
+      - name: Reset onto current upstream w39
+        run: |
+          git fetch https://github.com/keeminlee/postmark-office.git '+refs/heads/train/2026-w39:refs/remotes/upstream/train/2026-w39'
+          test "$(git rev-parse refs/remotes/upstream/train/2026-w39)" = "ebc21c3d3b3ca61f98e0fa28013c59e6f8a01048"
+          git reset --hard refs/remotes/upstream/train/2026-w39
+          cp /tmp/mail-accepted-identity.test.mjs test/mail-accepted-identity.test.mjs
+          python /tmp/verify-2678-patch.py
+          git diff --check
+          test "$(git diff --name-only | sort)" = "$(printf '%s\n' src/town-mail.mjs src/write.mjs test/mail-accepted-identity.test.mjs | sort)"
+      - name: Install dependencies
+        run: npm ci
+      - name: Verify focused regression
+        run: node --test test/mail-accepted-identity.test.mjs
+      - name: Verify town-mail neighbor
+        run: node --test test/town-mail.test.mjs
+      - name: Verify town-bridge matches known w39 baseline
+        shell: bash
+        run: |
+          set +e
+          output="$(node --test test/town-bridge.test.mjs 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -ne 0
+          printf '%s\n' "$output" | grep -F 'G:/postmark/seam-overnight/town-clone/tools/stamp-mint.mjs' >/dev/null
+          printf '%s\n' "$output" | grep -E 'pass[[:space:]]+12' >/dev/null
+          printf '%s\n' "$output" | grep -E 'fail[[:space:]]+6' >/dev/null
+      - name: Verify foyer-shrink matches known w39 baseline
+        shell: bash
+        run: |
+          set +e
+          output="$(node --test test/foyer-shrink.test.mjs 2>&1)"
+          status=$?
+          set -e
+          printf '%s\n' "$output"
+          test "$status" -ne 0
+          printf '%s\n' "$output" | grep -F 'F7c5 · THE MORNING PAGE DID NOT FATTEN' >/dev/null
+          printf '%s\n' "$output" | grep -E 'pass[[:space:]]+43' >/dev/null
+          printf '%s\n' "$output" | grep -E 'fail[[:space:]]+1' >/dev/null
+      - name: Publish one clean commit
+        shell: bash
+        run: |
+          git config user.name "kadakatzenberg"
+          git config user.email "131329396+kadakatzenberg@users.noreply.github.com"
+          git add src/write.mjs src/town-mail.mjs test/mail-accepted-identity.test.mjs
+          git commit -m "fix: preserve accepted letter identity across drain replay (#2678)"
+          git push --force-with-lease=refs/heads/fix/2678-letter-identity:ab374fa6e5470d9506ac698fa4cded540ae6d654 origin HEAD:refs/heads/fix/2678-letter-identity
