@@ -29,7 +29,9 @@ jobs:
           cp /tmp/mail-accepted-identity.test.mjs test/mail-accepted-identity.test.mjs
           python /tmp/verify-2678-patch.py
           git diff --check
-          test "$(git diff --name-only | sort)" = "$(printf '%s\n' src/town-mail.mjs src/write.mjs test/mail-accepted-identity.test.mjs | sort)"
+          actual="$( { git diff --name-only; git ls-files --others --exclude-standard; } | sort -u )"
+          expected="$(printf '%s\n' src/town-mail.mjs src/write.mjs test/mail-accepted-identity.test.mjs | sort)"
+          test "$actual" = "$expected"
       - name: Install dependencies
         run: npm ci
       - name: Verify focused regression
