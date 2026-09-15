@@ -237,3 +237,19 @@ test("the same mark IS a finding while canon genuinely lacks it — the control"
   const r = canonLockFindings([late], { slugs: new Set(["somebody/else"]), sha: "0".repeat(40) });
   assert.deepEqual(r.absent.map((a) => a.slug), [late.slug]);
 });
+
+// ── A TRANSFER IS NOT UNMATERIALIZED (DEC-16; 2026-09-15) ───────────────────
+//
+// the-town/the-lanternstep-parlor locked at window 172. On 08-29 the parlor
+// passed to wright; DEC-16 keeps the row's id (21e07250…) and moves its slug, so
+// the mark stands as wright/the-lanternstep-parlor while the claim keeps the old
+// name. The slug question listed it as unmaterialized for a week, and the fridge
+// recommended retiring it by hand — DEC-16's rejected alternative, which costs
+// the mark its escrow and its history. The read now asks the claim's own row.
+// CAN FAIL: drop the by-id clause from UNMATERIALIZED_SELECT → this reds.
+test("a locked claim whose own row stands under a NEW slug is a transfer, never unmaterialized (DEC-16)", () => {
+  assert.match(UNMATERIALIZED_SELECT, /NOT EXISTS \(SELECT 1 FROM marks m WHERE m\.id = c\.id\)/,
+    "the read asks whether the claim's own row exists before calling a lock unmaterialized");
+  // and the never-stood class is still asked by slug — the first clause stays
+  assert.match(UNMATERIALIZED_SELECT, /NOT EXISTS \(SELECT 1 FROM marks m WHERE m\.slug = coalesce\(c\.slug, c\.geometry->>'slug'\)\)/);
+});

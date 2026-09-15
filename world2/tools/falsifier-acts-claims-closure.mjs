@@ -76,8 +76,14 @@ for (const [i, a] of acts.entries()) {
   if (exempt.has(Number(a.journal_seq))) continue;
   // THE IDENTITY FIRST: acts.id, stamped on the claim by the pen that wrote
   // both inside one transaction.
+  // ONE ACT MAY CARRY TWO DOCKET ROWS (2026-09-15, redocket-refused.mjs): the
+  // office refused the first by its own defect (#2806) and re-docketed the act.
+  // The act is ON the docket when at least one row carries its id, and it is
+  // DOUBLE-WRITTEN when more than one row is live — not refused, not retracted.
   const { rows: [strong] } = await pool.query(
-    "SELECT count(*)::int c FROM claims WHERE data->>'_act_id' = $1", [String(a.id)]);
+    `SELECT count(*)::int c, count(*) FILTER (WHERE status NOT IN ('refused','retracted'))::int live
+       FROM claims WHERE data->>'_act_id' = $1`, [String(a.id)]);
+  const paired = strong.c >= 1 && strong.live <= 1;
   // THE LEGACY PAIR, only for a claim written before `_act_id` existed. A row
   // whose journal_seq is NULL cannot use it at all — `data->>'_journal_seq'`
   // is SQL NULL for those and NULL never equals anything, which is precisely
@@ -85,7 +91,7 @@ for (const [i, a] of acts.entries()) {
   // HAVE a journal_seq, so a flipped act with no `_act_id` stays red and says
   // so, instead of being quietly excused by a key that cannot see it.
   let legacy = 0;
-  if (strong.c !== 1 && a.journal_seq != null) {
+  if (!paired && a.journal_seq != null) {
     const { rows: [old] } = await pool.query(
       `SELECT count(*)::int c FROM claims
         WHERE data->>'_journal_seq' = $1 AND geometry->>'slug' IS NOT DISTINCT FROM $2
@@ -95,10 +101,10 @@ for (const [i, a] of acts.entries()) {
   }
   // The injected fault: the first act's claim is made to look absent, which is
   // the exact shape wright/lab-cairn had when this falsifier was born red.
-  const found = SELF_TEST && i === 0 ? 0 : (strong.c === 1 ? 1 : legacy);
-  if (found === 1) { if (strong.c === 1) byActId++; else byLegacy++; }
+  const found = SELF_TEST && i === 0 ? 0 : (paired ? 1 : legacy);
+  if (found === 1) { if (paired) byActId++; else byLegacy++; }
   if (found !== 1) {
-    console.error(`RED: act ${a.id} (${a.actor} ${a.action} ${a.object ?? ""} @ ${a.at.toISOString?.() ?? a.at}, journal_seq ${a.journal_seq}) has ${found} docket rows (want 1) — submitted but never received, or received twice`);
+    console.error(`RED: act ${a.id} (${a.actor} ${a.action} ${a.object ?? ""} @ ${a.at.toISOString?.() ?? a.at}, journal_seq ${a.journal_seq}) has ${strong.c} docket rows, ${strong.live} live (want at least one row, at most one live) — submitted but never received, or received twice`);
     red++;
   }
 }
