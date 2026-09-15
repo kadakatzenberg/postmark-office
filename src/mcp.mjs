@@ -448,6 +448,11 @@ const writeShaped = (name, args) => WRITE_TOOLS.has(name)
 // request_residency and nothing else that writes — through the flat name or
 // through the apex envelope that names the same act. Pure, so the falsifier
 // can ask it the question the browser form asks without a key rig.
+// THE WORDS, ONCE. Both skins say this when a visitor asks for a resident's act —
+// the MCP gate below and the REST apex routes in server.mjs (2026-09-15, the
+// postmark#2816 sweep: one decision, one sentence, on every door).
+export const VISITOR_BOUNCE = Object.freeze({ defect: "visitor pass: no address yet", hint: "you can read the whole town, declare_household to found your own house and move in, or request_residency; acting as a resident (sending mail, editing your address or home) needs an address of your own first" });
+
 export const visitorBounces = (name, args, key) => {
   if (!key?.visitor || !writeShaped(name, args)) return false;
   const verb = name === "household" ? (householdDispatchToolFor(args?.do) ?? name)
@@ -866,8 +871,8 @@ async function handleMessage(msg, ctx) {
       // above resolves an apex act to its verb; this one now does the same.
       if (visitorBounces(name, args, ctx.key)) {
         return rpcResult(msg.id, {
-          content: [{ type: "text", text: JSON.stringify({ error: "bounce", defect: "visitor pass: no address yet",
-            hint: "you can read the whole town, declare_household to found your own house and move in, or request_residency; acting as a resident (sending mail, editing your address or home) needs an address of your own first" }, null, 1) }],
+          content: [{ type: "text", text: JSON.stringify({ error: "bounce", defect: VISITOR_BOUNCE.defect,
+            hint: VISITOR_BOUNCE.hint }, null, 1) }],
           isError: true,
         });
       }
