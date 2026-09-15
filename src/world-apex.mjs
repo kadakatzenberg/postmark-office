@@ -2578,7 +2578,10 @@ const WORLD_READ_FIELDS = Object.freeze({
   // caller who typed read: where they meant do: actually needs. Declared on the
   // ONE read that teaches about them, so `read: "walk", args: { text }` still
   // bounces by name.
-  say: { text: { type: "string", description: "refused — a read never performs; speak with do: \"say\"" } },
+  say: {
+  text: { type: "string", description: "refused — a read never performs; speak with do: \"say\"" },
+  since: { type: "number", description: "the `latest` stamp from your previous reply — receive only voices newer than it" },
+},
   walk: {},
   "leave-mark": { mark: { type: "string", description: "one mark to look into — <by>/<slug>" },
                   depth: { type: "number", description: "how far down to descend into that mark" },
@@ -2621,7 +2624,7 @@ export async function readDomainFor(action, fields, key, oriented, ctx = {}) {
   switch (action) {
     case "say": {
       if (fields?.text) return { error: "bounce", code: 422, defect: "a read never performs", hint: `to speak, use do: — world { do: "say", args: { text: … } }. read: "say" only listens.` };
-      return { heard: await call("world_say", {}) };
+      return { heard: await call("world_say", fields?.since != null ? { since: fields.since } : {}) };
     }
     case "walk": {
       // BOUND BY RADIUS, NOT BY TRUNCATING THE ROLL. This read was 33 KB

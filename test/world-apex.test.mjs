@@ -1512,3 +1512,19 @@ test("a class that opens a verb to two kinds keeps both — the human's grant su
       "a verb this ground never declared is still not afforded — the kinds filter is intact");
   } finally { db.close(); }
 });
+
+
+test("say shadow accepts and forwards since", async () => {
+  on();
+  const first = await worldApex({ read: "say" }, KEY_ALPHA);
+  assert.ok(!first.error, JSON.stringify(first).slice(0, 300));
+  const cursor = first.heard.latest;
+
+  const spoken = await worldApex({ do: "say", args: { text: "say-shadow-cursor-probe" } }, KEY_ALPHA);
+  assert.ok(!spoken.error, JSON.stringify(spoken).slice(0, 300));
+
+  const r = await worldApex({ read: "say", args: { since: cursor } }, KEY_ALPHA);
+  assert.ok(!r.error, JSON.stringify(r).slice(0, 300));
+  assert.ok(r.heard.voices.some((v) => v.said === "say-shadow-cursor-probe"),
+    "the say shadow accepted since but did not forward it to world_say");
+});
