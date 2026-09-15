@@ -1,0 +1,108 @@
+name: SOPHIA world say since repair
+
+on:
+  push:
+    branches:
+      - sophia/fix-world-say-since
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: sophia/fix-world-say-since
+          fetch-depth: 1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Add regression test
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('test/world-apex.test.mjs')
+          s = p.read_text()
+          marker = 'say shadow accepts and forwards since'
+          if marker not in s:
+              s += r'''
+
+          test("say shadow accepts and forwards since", async () => {
+            on();
+            const first = await worldApex({ read: "say" }, KEY_ALPHA);
+            assert.ok(!first.error, JSON.stringify(first).slice(0, 300));
+            const cursor = first.heard.latest;
+
+            const spoken = await worldApex({ do: "say", args: { text: "say-shadow-cursor-probe" } }, KEY_ALPHA);
+            assert.ok(!spoken.error, JSON.stringify(spoken).slice(0, 300));
+
+            const r = await worldApex({ read: "say", args: { since: cursor } }, KEY_ALPHA);
+            assert.ok(!r.error, JSON.stringify(r).slice(0, 300));
+            assert.ok(r.heard.voices.some((v) => v.said === "say-shadow-cursor-probe"),
+              "the say shadow accepted since but did not forward it to world_say");
+          });
+          '''
+              p.write_text(s)
+
+      - name: RED - current upstream reproduces the since-field defect
+        shell: bash
+        run: |
+          set +e
+          node --test --test-concurrency=1 --test-timeout=180000 --test-name-pattern="say shadow accepts and forwards since" test/world-apex.test.mjs > /tmp/red.log 2>&1
+          rc=$?
+          cat /tmp/red.log
+          if [ "$rc" -eq 0 ]; then
+            echo "Expected the regression to fail before the production change, but it passed."
+            exit 1
+          fi
+          if ! grep -q 'unknown argument.*since' /tmp/red.log; then
+            echo "Regression failed for a reason other than the live-reproduced since-field defect."
+            exit 1
+          fi
+
+      - name: Patch the say shadow cursor wiring
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('src/world-apex.mjs')
+          s = p.read_text()
+
+          old_fields = '''  say: { text: { type: "string", description: "refused — a read never performs; speak with do: \\\"say\\\"" } },'''
+          new_fields = '''  say: {
+            text: { type: "string", description: "refused — a read never performs; speak with do: \\\"say\\\"" },
+            since: { type: "number", description: "the `latest` stamp from your previous reply — receive only voices newer than it" },
+          },'''
+          if s.count(old_fields) != 1:
+              raise SystemExit(f'expected one say read-field row, found {s.count(old_fields)}')
+          s = s.replace(old_fields, new_fields)
+
+          old_call = '      return { heard: await call("world_say", {}) };'
+          new_call = '      return { heard: await call("world_say", fields?.since != null ? { since: fields.since } : {}) };'
+          if s.count(old_call) != 1:
+              raise SystemExit(f'expected one say shadow call, found {s.count(old_call)}')
+          s = s.replace(old_call, new_call)
+          p.write_text(s)
+
+      - name: GREEN - regression passes
+        run: node --test --test-concurrency=1 --test-timeout=180000 --test-name-pattern="say shadow accepts and forwards since" test/world-apex.test.mjs
+
+      - name: Verify apex read-argument contract
+        run: node --test --test-concurrency=1 --test-timeout=180000 test/apex-read-args.test.mjs
+
+      - name: Commit only source and regression test
+        shell: bash
+        run: |
+          rm .github/workflows/sophia-fix-world-say-since.yml
+          git config user.name "SOPHIA"
+          git config user.email "131329396+kadakatzenberg@users.noreply.github.com"
+          git add src/world-apex.mjs test/world-apex.test.mjs .github/workflows/sophia-fix-world-say-since.yml
+          git commit -m "fix: forward since through world say shadow"
+          git push origin HEAD:sophia/fix-world-say-since
