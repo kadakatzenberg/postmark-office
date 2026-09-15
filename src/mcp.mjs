@@ -443,6 +443,20 @@ const writeShaped = (name, args) => WRITE_TOOLS.has(name)
   || (name === "household" && args != null && typeof args === "object" && args.do != null && args.do !== "")
   || (name === "town" && args != null && typeof args === "object" && args.do != null && args.do !== "");
 
+// A VISITOR'S WRITE, DECIDED BY THE VERB IT RESOLVES TO (2026-09-15, postmark#2816).
+// A signed-in account with no household may declare_household or
+// request_residency and nothing else that writes — through the flat name or
+// through the apex envelope that names the same act. Pure, so the falsifier
+// can ask it the question the browser form asks without a key rig.
+export const visitorBounces = (name, args, key) => {
+  if (!key?.visitor || !writeShaped(name, args)) return false;
+  const verb = name === "household" ? (householdDispatchToolFor(args?.do) ?? name)
+    : name === "town" ? (townDispatchToolFor(args?.do) ?? name)
+    : name === "world" ? (dispatchToolFor(args?.do) ?? name)
+    : name;
+  return verb !== "request_residency" && verb !== "declare_household";
+};
+
 // The flat property maps, for the apex verbs' one-validator envelope checks.
 // Built lazily AFTER TOOLS exists; passed down so household-apex never has to
 // import this module (a line of data beats a cycle).
@@ -844,7 +858,13 @@ async function handleMessage(msg, ctx) {
       // and may declare_household or request_residency — but no other write acts
       // as a resident. declare_household is the one a visitor most needs: having
       // no household is its precondition, not a reason to refuse it.
-      if (writeShaped(name, args) && name !== "request_residency" && name !== "declare_household" && ctx.key?.visitor) {
+      // THE TWO DOORS A VISITOR MAY OPEN ARE VERBS, NOT WIRE NAMES (2026-09-15,
+      // postmark#2816). The chat-only Declare form sends the apex envelope
+      // `household { do: "declare" }`; this gate compared the tool name on the
+      // wire — "household" — against the two flat names and refused every
+      // visitor with a hint telling them to declare_household. The harbor gate
+      // above resolves an apex act to its verb; this one now does the same.
+      if (visitorBounces(name, args, ctx.key)) {
         return rpcResult(msg.id, {
           content: [{ type: "text", text: JSON.stringify({ error: "bounce", defect: "visitor pass: no address yet",
             hint: "you can read the whole town, declare_household to found your own house and move in, or request_residency; acting as a resident (sending mail, editing your address or home) needs an address of your own first" }, null, 1) }],
