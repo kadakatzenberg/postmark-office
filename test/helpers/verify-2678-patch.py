@@ -1,0 +1,88 @@
+from pathlib import Path
+
+write = Path("src/write.mjs")
+text = write.read_text()
+new_sig = "export function validateLetter({ from, to, title, thread, body, stake_topic, stake_candidate, stake_stamps }, key, db, acceptedIdentity = null) {"
+if new_sig not in text:
+    old_sig = "export function validateLetter({ from, to, title, thread, body, stake_topic, stake_candidate, stake_stamps }, key, db) {"
+    assert text.count(old_sig) == 1
+    text = text.replace(old_sig, new_sig, 1)
+
+    old_identity = (
+        "  const date = letterDate();\n"
+        "  const slug = slugify(title);\n"
+        "  const id = `${from}-${date}-to-${to}-${slug}`;\n"
+        "  if (db.prepare(\"SELECT 1 FROM letters WHERE id = ?\").get(id))\n"
+        "    throw bounce(409, \"a letter with this id already exists today\", \"change the title, or write tomorrow — one slug per correspondent per day\");\n"
+        "\n"
+        "  return { id, from, to, date, thread, slug, stakeFm, body };\n"
+        "}"
+    )
+    new_identity = (
+        "  const slug = slugify(title);\n"
+        "  const derivedDate = letterDate();\n"
+        "  let date = derivedDate;\n"
+        "  let id = `${from}-${date}-to-${to}-${slug}`;\n"
+        "\n"
+        "  // A drain replay is not a new send. The town-log row already carries the\n"
+        "  // identity the send door accepted, and wall time may have crossed the\n"
+        "  // town's midnight before the ferry materialises it (#2678). Preserve that\n"
+        "  // accepted identity, but validate it against the envelope before using it\n"
+        "  // as a path so a journal row can never smuggle an arbitrary filename in.\n"
+        "  if (acceptedIdentity?.id || acceptedIdentity?.file) {\n"
+        "    const storedId = String(acceptedIdentity?.id ?? \"\");\n"
+        "    const storedFile = String(acceptedIdentity?.file ?? \"\");\n"
+        "    const prefix = `WHITE_PAGES/${from}/outbox/letter-`;\n"
+        "    const suffix = `-to-${to}-${slug}.md`;\n"
+        "    const candidateDate = storedFile.startsWith(prefix) && storedFile.endsWith(suffix)\n"
+        "      ? storedFile.slice(prefix.length, storedFile.length - suffix.length)\n"
+        "      : \"\";\n"
+        "    const expectedId = `${from}-${candidateDate}-to-${to}-${slug}`;\n"
+        "    if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(candidateDate)\n"
+        "        || storedId !== expectedId\n"
+        "        || storedFile !== outboxRelPath(from, candidateDate, to, slug)) {\n"
+        "      throw bounce(500, \"stored letter identity is inconsistent with its accepted envelope\",\n"
+        "        \"the town-log row's id and file must name the same sender, date, recipient, and title slug; do not re-derive or guess a replacement identity\");\n"
+        "    }\n"
+        "    date = candidateDate;\n"
+        "    id = storedId;\n"
+        "  }\n"
+        "\n"
+        "  if (db.prepare(\"SELECT 1 FROM letters WHERE id = ?\").get(id))\n"
+        "    throw bounce(409, \"a letter with this id already exists today\", \"change the title, or write tomorrow — one slug per correspondent per day\");\n"
+        "\n"
+        "  return { id, from, to, date, thread, slug, stakeFm, body };\n"
+        "}"
+    )
+    assert text.count(old_identity) == 1
+    text = text.replace(old_identity, new_identity, 1)
+
+    old_enqueue = (
+        "export function enqueueLetter(args, key, db, clone) {\n"
+        "  const { id, from, to, date, thread, slug, stakeFm, body } = validateLetter(args, key, db);"
+    )
+    new_enqueue = (
+        "export function enqueueLetter(args, key, db, clone, acceptedIdentity = null) {\n"
+        "  const { id, from, to, date, thread, slug, stakeFm, body } = validateLetter(args, key, db, acceptedIdentity);\n"
+        "  const relFile = acceptedIdentity?.file ?? outboxRelPath(from, date, to, slug);"
+    )
+    assert text.count(old_enqueue) == 1
+    text = text.replace(old_enqueue, new_enqueue, 1)
+
+    old_file = "  const file = join(clone, outboxRelPath(from, date, to, slug));"
+    assert text.count(old_file) == 1
+    text = text.replace(old_file, "  const file = join(clone, relFile);", 1)
+    write.write_text(text)
+
+town = Path("src/town-mail.mjs")
+text = town.read_text()
+old_replay = "  return { row, result: door(row.payload?.args ?? {}, asKey, db, clone) };"
+new_replay = (
+    "  const acceptedIdentity = row.payload?.id && row.payload?.file\n"
+    "    ? { id: row.payload.id, file: row.payload.file }\n"
+    "    : null;\n"
+    "  return { row, result: door(row.payload?.args ?? {}, asKey, db, clone, acceptedIdentity) };"
+)
+if new_replay not in text:
+    assert text.count(old_replay) == 1
+    town.write_text(text.replace(old_replay, new_replay, 1))
