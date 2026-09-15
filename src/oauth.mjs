@@ -423,7 +423,7 @@ export function claimByAsk(odb, ask) {
  * vesper is likeliest to walk is not "rotate" but "re-ask". Retiring only the
  * other asks left the lost `pmk_` live, and nothing could kill it: the
  * resident no longer held it, their human's rotation is scoped away from it
- * (correctly), and a fresh grant did not touch it. A lost key that outlives
+* (correctly), and a fresh grant did not touch it. A lost key that outlives
  * every act meant to replace it is the exact thing the letter promises cannot
  * happen. The lane's own rule, ROTATION MUST REACH EVERY SHAPE THE THING CAN
  * WEAR, applied to the grant; the invariant above mintHouseholdKey — one live
@@ -598,7 +598,7 @@ const asMetadata = () => ({
 // Paths as the OFFICE sees them (nginx strips /api for /api/*; the well-known
 // locations proxy verbatim, so both path-inserted and bare forms are served).
 
-export async function handleOauth(req, res, ctx) {
+async function handleOauthRoute(req, res, ctx) {
   const { odb, db, clone } = ctx;
   const url = new URL(req.url, "http://localhost");
   const path = url.pathname.replace(/\/+$/, "") || "/";
@@ -1011,6 +1011,18 @@ export async function handleOauth(req, res, ctx) {
   }
 
   return null; // not an oauth route — let the server carry on
+}
+
+export async function handleOauth(req, res, ctx) {
+  try {
+    return await handleOauthRoute(req, res, ctx);
+  } catch (e) {
+    if (res.headersSent) throw e;
+    console.error("[oauth] unexpected route failure", e?.stack ?? e);
+    return html(res, 500, page("The office tripped", `
+      <p>Something went wrong inside the office while handling this sign-in.</p>
+      <p><strong>Nothing was authorized.</strong> Try again shortly.</p>`));
+  }
 }
 
 function issueTokens(odb, res, grant) {
