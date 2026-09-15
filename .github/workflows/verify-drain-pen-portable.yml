@@ -1,0 +1,29 @@
+name: Verify portable drain pen fixture
+
+on:
+  push:
+    branches: [fix/drain-pen-portable-engine]
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: town-bridge becomes portable
+        run: node --test test/town-bridge.test.mjs
+      - name: town-journal
+        run: node --test test/town-journal.test.mjs
+      - name: gangway-drain
+        run: node --test test/gangway-drain.test.mjs
+      - name: paper-seam
+        run: node --test test/paper-seam.test.mjs
+      - name: deferral-tripwire
+        run: node --test test/deferral-tripwire.test.mjs
+      - name: drain-idempotence
+        run: node --test test/drain-idempotence.test.mjs
