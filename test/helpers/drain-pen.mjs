@@ -13,7 +13,7 @@
 // here makes these tests portable without pretending a fixture engine proves
 // the town's cryptographic implementation.
 import { generateKeyPairSync } from "node:crypto";
-import { writeFileSync, mkdtempSync } from "node:fs";
+import { mkdirSync, writeFileSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -24,7 +24,6 @@ writeFileSync(keyFile, privateKey.export({ type: "pkcs8", format: "pem" }));
 
 const engineDir = join(dir, "engine");
 const engineFile = join(engineDir, "stamp-mint.mjs");
-const { mkdirSync } = await import("node:fs");
 mkdirSync(engineDir, { recursive: true });
 writeFileSync(engineFile, `
 import { createHash } from "node:crypto";
