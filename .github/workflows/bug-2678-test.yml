@@ -1,27 +1,143 @@
-name: Bug 2678 regression
+name: Bug 2678 repair workbench
 
 on:
   push:
     branches: [fix/2678-letter-identity]
 
+permissions:
+  contents: write
+
 jobs:
-  regression:
+  repair:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: fix/2678-letter-identity
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Prove the regression test is RED for #2678
+
+      - name: Apply the minimal accepted-identity repair
         shell: bash
         run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          write = Path('src/write.mjs')
+          text = write.read_text()
+          if 'export function validateLetter({ from, to, title, thread, body, stake_topic, stake_candidate, stake_stamps }, key, db, acceptedIdentity = null)' not in text:
+              old_sig = 'export function validateLetter({ from, to, title, thread, body, stake_topic, stake_candidate, stake_stamps }, key, db) {'
+              new_sig = 'export function validateLetter({ from, to, title, thread, body, stake_topic, stake_candidate, stake_stamps }, key, db, acceptedIdentity = null) {'
+              assert old_sig in text
+              text = text.replace(old_sig, new_sig, 1)
+
+              old_identity = '''  const date = letterDate();
+          const slug = slugify(title);
+          const id = `${from}-${date}-to-${to}-${slug}`;
+          if (db.prepare("SELECT 1 FROM letters WHERE id = ?").get(id))
+            throw bounce(409, "a letter with this id already exists today", "change the title, or write tomorrow — one slug per correspondent per day");
+
+          return { id, from, to, date, thread, slug, stakeFm, body };
+          }'''
+              new_identity = '''  const slug = slugify(title);
+          const derivedDate = letterDate();
+          let date = derivedDate;
+          let id = `${from}-${date}-to-${to}-${slug}`;
+          let file = outboxRelPath(from, date, to, slug);
+
+          // A drain replay is not a new send. The town-log row already carries the
+          // identity the send door accepted, and wall time may have crossed the
+          // town's midnight before the ferry materialises it (#2678). Preserve that
+          // accepted identity, but validate it against the envelope before using it
+          // as a path so a journal row can never smuggle an arbitrary filename in.
+          if (acceptedIdentity?.id || acceptedIdentity?.file) {
+            const storedId = String(acceptedIdentity?.id ?? "");
+            const storedFile = String(acceptedIdentity?.file ?? "");
+            const prefix = `WHITE_PAGES/${from}/outbox/letter-`;
+            const suffix = `-to-${to}-${slug}.md`;
+            const candidateDate = storedFile.startsWith(prefix) && storedFile.endsWith(suffix)
+              ? storedFile.slice(prefix.length, storedFile.length - suffix.length)
+              : "";
+            const expectedId = `${from}-${candidateDate}-to-${to}-${slug}`;
+            if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(candidateDate)
+                || storedId !== expectedId
+                || storedFile !== outboxRelPath(from, candidateDate, to, slug)) {
+              throw bounce(500, "stored letter identity is inconsistent with its accepted envelope",
+                "the town-log row's id and file must name the same sender, date, recipient, and title slug; do not re-derive or guess a replacement identity");
+            }
+            date = candidateDate;
+            id = storedId;
+            file = storedFile;
+          }
+
+          if (db.prepare("SELECT 1 FROM letters WHERE id = ?").get(id))
+            throw bounce(409, "a letter with this id already exists today", "change the title, or write tomorrow — one slug per correspondent per day");
+
+          return { id, file, from, to, date, thread, slug, stakeFm, body };
+          }'''
+              assert old_identity in text
+              text = text.replace(old_identity, new_identity, 1)
+
+              old_enqueue = '''export function enqueueLetter(args, key, db, clone) {
+          const { id, from, to, date, thread, slug, stakeFm, body } = validateLetter(args, key, db);'''
+              new_enqueue = '''export function enqueueLetter(args, key, db, clone, acceptedIdentity = null) {
+          const { id, file: relFile, from, to, date, thread, slug, stakeFm, body } = validateLetter(args, key, db, acceptedIdentity);'''
+              assert old_enqueue in text
+              text = text.replace(old_enqueue, new_enqueue, 1)
+
+              old_file = '  const file = join(clone, outboxRelPath(from, date, to, slug));'
+              new_file = '  const file = join(clone, relFile);'
+              assert old_file in text
+              text = text.replace(old_file, new_file, 1)
+              write.write_text(text)
+
+          town = Path('src/town-mail.mjs')
+          text = town.read_text()
+          old_replay = '  return { row, result: door(row.payload?.args ?? {}, asKey, db, clone) };'
+          new_replay = '''  const acceptedIdentity = row.payload?.id && row.payload?.file
+            ? { id: row.payload.id, file: row.payload.file }
+            : null;
+          return { row, result: door(row.payload?.args ?? {}, asKey, db, clone, acceptedIdentity) };'''
+          if new_replay not in text:
+              assert old_replay in text
+              text = text.replace(old_replay, new_replay, 1)
+              town.write_text(text)
+          PY
+
+      - name: GREEN focused regression
+        run: node --test test/mail-accepted-identity.test.mjs
+
+      - name: Flip back to the bug and prove RED
+        shell: bash
+        run: |
+          git diff -- src/write.mjs src/town-mail.mjs > /tmp/2678.patch
+          test -s /tmp/2678.patch
+          git checkout -- src/write.mjs src/town-mail.mjs
           set +e
           output="$(node --test test/mail-accepted-identity.test.mjs 2>&1)"
           status=$?
           set -e
           printf '%s\n' "$output"
-          if [ "$status" -eq 0 ]; then
-            echo "Expected the regression test to fail before the implementation fix."
-            exit 1
-          fi
+          test "$status" -ne 0
           printf '%s\n' "$output" | grep -F "the drain must return the id the send door already accepted, not one derived from drain time" >/dev/null
+          git apply /tmp/2678.patch
+
+      - name: Restore GREEN and run the neighboring mail suites
+        run: |
+          node --test test/mail-accepted-identity.test.mjs
+          node --test test/town-mail.test.mjs test/town-bridge.test.mjs test/foyer-shrink.test.mjs
+
+      - name: Commit the repair back to the branch
+        shell: bash
+        run: |
+          if git diff --quiet -- src/write.mjs src/town-mail.mjs; then
+            echo "repair already committed"
+            exit 0
+          fi
+          git config user.name "kadakatzenberg"
+          git config user.email "131329396+kadakatzenberg@users.noreply.github.com"
+          git add src/write.mjs src/town-mail.mjs
+          git commit -m "fix: preserve accepted letter identity across drain replay (#2678)"
+          git push origin HEAD:fix/2678-letter-identity
