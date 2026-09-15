@@ -1,0 +1,19 @@
+name: Verify #2678 foyer baseline
+
+on:
+  push:
+    branches: [verify/2678-town-bridge-baseline]
+
+jobs:
+  foyer-baseline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - name: Run untouched w39 foyer-shrink suite
+        run: node --test test/foyer-shrink.test.mjs
