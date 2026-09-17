@@ -31,16 +31,18 @@ import { createHash } from "node:crypto";
 const sha256hex = (s) => createHash("sha256").update(s, "utf8").digest("hex");
 const GENESIS_SEAL_SEED = "postmark-stamps-v1";
 
+// Transcribed from the town engine, not paraphrased — the raw line is tested,
+// never a trimmed copy, and the signature must run to the end of the line with
+// no whitespace in it. A fixture that is MORE permissive than the law reads a
+// malformed line as signed, which is the class the drain-signs suite exists for.
+// test/drain-pen-fixture.test.mjs pins every one of those shapes.
 export function parseStampLedger(text) {
   const out = [];
   for (const raw of text.replace(/\\r\\n/g, "\\n").split("\\n")) {
-    const line = raw.trim();
-    if (!line.startsWith("- ")) continue;
-    const marker = " · sig: ";
-    const i = line.lastIndexOf(marker);
-    out.push(i === -1
-      ? { canonical: line, sig: null, raw: line }
-      : { canonical: line.slice(0, i), sig: line.slice(i + marker.length), raw: line });
+    if (!raw.startsWith("- ")) continue;
+    const m = /^(.*) · sig: (\\S+)$/.exec(raw);
+    if (m) out.push({ canonical: m[1], sig: m[2], raw });
+    else out.push({ canonical: raw, sig: null, raw });
   }
   return out;
 }
