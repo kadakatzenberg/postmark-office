@@ -139,10 +139,17 @@ test("REST and MCP middleware return exact 429s with independent key and househo
 // clock answers exactly 30 and nothing else can.
 //
 // Its own server, on its own port, derived from the pid the way
-// test/read-worker.test.mjs derives its berth. (This file's own PORT is still a
-// fixed 43855 — same class as office issue #19 — left alone here because it is
-// not this change's instance.)
-const LIVE_PORT = 46200 + ((process.pid * 11) % 1500);
+// test/read-worker.test.mjs derives its berth — and in a band clear of every
+// other one in test/, which is the half of that house rule that is easy to get
+// wrong. The fixed ports live in 43821..43922; claim-ledger takes 44000..45499
+// and read-worker 46000..47999. So this one sits above all three, and takes one
+// port in it. (read-worker's own note that "nothing in test/ sits above 44000"
+// is now out of date, and nothing in the suite reads that invariant — worth a
+// guard of its own, which is not this change's instance.)
+//
+// (This file's own PORT is still a fixed 43855 — the same class as office issue
+// #19 — left alone here for the same reason.)
+const LIVE_PORT = 48000 + ((process.pid * 13) % 1500);
 
 test("with no --bouncer-now-ms the office keeps Date.now — the seam is a test affordance, never a new default", async () => {
   const dir = mkdtempSync(join(tmpdir(), "postmark-office-liveclock-"));
