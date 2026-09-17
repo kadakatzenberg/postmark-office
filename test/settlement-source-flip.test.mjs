@@ -51,15 +51,45 @@ const has = (cmd) => { try { execFileSync("sh", ["-c", cmd], { stdio: "ignore" }
 // the "check reached for something easier than the behaviour" defect.
 const SH_OK = has("sh -c 'true'");
 
+// ── "NEWEST BY NAME" IS NOT A STRING SORT, BECAUSE THE WEEK IS NOT PADDED ────
+//
+// Trains are named `train/YYYY-wNN` with NO zero padding — `tools/train-week-
+// check.mjs` writes `train/${year}-w${open}` straight from the number, and the
+// live refs read `2026-w35 · 2026-w35b · 2026-w36 … 2026-w39`. Under git's own
+// `--sort=-refname` that ordering breaks the moment a year reaches week 10:
+//
+//   $ git for-each-ref --sort=-refname 'refs/remotes/origin/train/*'
+//   origin/train/2027-w9      ← picked
+//   origin/train/2027-w2
+//   origin/train/2027-w11     ← the actual open train
+//   origin/train/2027-w10
+//   origin/train/2027-w1
+//
+// Which is this file's own defect one layer down: a baseline that goes stale
+// because the calendar turned. The week is compared as a NUMBER, the year
+// before it, and a re-cut suffix (`w35b`) after it, so the order is the order
+// trains actually open in. A ref that does not parse as a train name sorts last
+// rather than being dropped — it can still be the only one there is.
+export function newestTrainRef(refs) {
+  const key = (ref) => {
+    const m = /(?:^|\/)(\d{4})-w(\d+)([a-z]*)$/.exec(ref);
+    return m ? { ok: 1, year: Number(m[1]), week: Number(m[2]), suffix: m[3] } : { ok: 0, year: 0, week: 0, suffix: "" };
+  };
+  return [...refs].sort((a, b) => {
+    const [x, y] = [key(a), key(b)];
+    return (y.ok - x.ok) || (y.year - x.year) || (y.week - x.week) || y.suffix.localeCompare(x.suffix);
+  })[0];
+}
+
 function openTrainRef() {
   const explicit = String(process.env.TRAIN_REF ?? "").trim();
   if (explicit) return explicit;
   const refs = execFileSync("git", [
-    "-C", OFFICE, "for-each-ref", "--sort=-refname",
+    "-C", OFFICE, "for-each-ref",
     "--format=%(refname:short)", "refs/remotes/origin/train/*",
   ], { encoding: "utf8" }).split(/\r?\n/).map((r) => r.trim()).filter(Boolean);
   if (!refs.length) throw new Error("no open train ref under refs/remotes/origin/train/*");
-  return refs[0];
+  return newestTrainRef(refs);
 }
 
 /** The train's shipping script, read from git so this test cannot drift from it. */
@@ -686,4 +716,55 @@ test("F-mode · an unrecognised SETTLEMENT_SOURCE refuses rather than defaulting
   assert.match(bad.res.stderr, /is not `store` or `git`/);
   assert.ok(!bad.commands.some((c) => c.includes("world-drain.mjs")),
     "it refuses before touching anything");
+});
+
+// ── F-newest · THE DERIVATION ITSELF, ON THE WEEK IT WOULD HAVE DECAYED ──────
+//
+// The rest of this file reads the open train out of git. That derivation is the
+// one thing here no crossing fixture can falsify, because today's refs (w35…w39)
+// happen to order correctly under any comparator. This test hands it the refs a
+// January does: it needs no repo, no shell, and no crossing, and it is the only
+// place the "newest train" claim is actually measured.
+test("F-newest · the open train is the newest by WEEK, not by string — the 2027-w9-beats-w11 decay", () => {
+  // Verified against git itself: `for-each-ref --sort=-refname` returns this set
+  // as w9, w2, w11, w10, w1 — the stale baseline first.
+  assert.equal(
+    newestTrainRef([
+      "origin/train/2027-w1", "origin/train/2027-w2", "origin/train/2027-w9",
+      "origin/train/2027-w10", "origin/train/2027-w11",
+    ]),
+    "origin/train/2027-w11",
+    "week 11 is open; a string sort picks week 9 and this instrument goes back to comparing against a stale train",
+  );
+
+  // The year outranks the week, or the first train of a new year loses to the
+  // last of the old one.
+  assert.equal(
+    newestTrainRef(["origin/train/2026-w52", "origin/train/2027-w1"]),
+    "origin/train/2027-w1",
+  );
+
+  // A re-cut train is newer than the week it re-cuts. `2026-w35b` is a real ref
+  // in this repo, so this is the live shape, not a hypothetical one.
+  assert.equal(
+    newestTrainRef(["origin/train/2026-w35", "origin/train/2026-w35b"]),
+    "origin/train/2026-w35b",
+  );
+
+  // Today's actual refs still resolve the way they did before this repair.
+  assert.equal(
+    newestTrainRef([
+      "origin/train/2026-w35", "origin/train/2026-w35b", "origin/train/2026-w36",
+      "origin/train/2026-w37", "origin/train/2026-w38", "origin/train/2026-w39",
+    ]),
+    "origin/train/2026-w39",
+  );
+
+  // A name this cannot parse is sorted last rather than dropped — it can still
+  // be the only ref there is, and an unusable answer beats no answer at all.
+  assert.equal(newestTrainRef(["origin/train/hotfix"]), "origin/train/hotfix");
+  assert.equal(
+    newestTrainRef(["origin/train/hotfix", "origin/train/2026-w39"]),
+    "origin/train/2026-w39",
+  );
 });
